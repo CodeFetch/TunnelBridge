@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#ifndef _WG_PEER_H
-#define _WG_PEER_H
+#ifndef _TB_PEER_H
+#define _TB_PEER_H
 
 #include "device.h"
 #include "noise.h"
@@ -16,7 +17,7 @@
 #include <linux/kref.h>
 #include <net/dst_cache.h>
 
-struct wg_device;
+struct tb_device;
 
 struct endpoint {
 	union {
@@ -34,8 +35,8 @@ struct endpoint {
 	};
 };
 
-struct wg_peer {
-	struct wg_device *device;
+struct tb_peer {
+	struct tb_device *device;
 	struct crypt_queue tx_queue, rx_queue;
 	struct sk_buff_head staged_packet_queue;
 	int serial_work_cpu;
@@ -66,18 +67,18 @@ struct wg_peer {
 	bool is_dead;
 };
 
-struct wg_peer *wg_peer_create(struct wg_device *wg,
+struct tb_peer *tb_peer_create(struct tb_device *tb,
 			       const u8 public_key[NOISE_PUBLIC_KEY_LEN],
 			       const u8 preshared_key[NOISE_SYMMETRIC_KEY_LEN]);
 
-struct wg_peer *__must_check wg_peer_get_maybe_zero(struct wg_peer *peer);
-static inline struct wg_peer *wg_peer_get(struct wg_peer *peer)
+struct tb_peer *__must_check tb_peer_get_maybe_zero(struct tb_peer *peer);
+static inline struct tb_peer *tb_peer_get(struct tb_peer *peer)
 {
 	kref_get(&peer->refcount);
 	return peer;
 }
-void wg_peer_put(struct wg_peer *peer);
-void wg_peer_remove(struct wg_peer *peer);
-void wg_peer_remove_all(struct wg_device *wg);
+void tb_peer_put(struct tb_peer *peer);
+void tb_peer_remove(struct tb_peer *peer);
+void tb_peer_remove_all(struct tb_device *tb);
 
-#endif /* _WG_PEER_H */
+#endif /* _TB_PEER_H */

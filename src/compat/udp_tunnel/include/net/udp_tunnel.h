@@ -1,5 +1,5 @@
-#ifndef _WG_NET_UDP_TUNNEL_H
-#define _WG_NET_UDP_TUNNEL_H
+#ifndef _TB_NET_UDP_TUNNEL_H
+#define _TB_NET_UDP_TUNNEL_H
 
 #include <net/ip_tunnels.h>
 #include <net/udp.h>
@@ -91,4 +91,4 @@ int udp_tunnel6_xmit_skb(struct dst_entry *dst, struct sock *sk,
 
 void udp_tunnel_sock_release(struct socket *sock);
 
-#endif /* _WG_NET_UDP_TUNNEL_H */
+#endif /* _TB_NET_UDP_TUNNEL_H */

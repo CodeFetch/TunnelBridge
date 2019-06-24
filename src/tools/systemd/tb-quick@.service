@@ -1,0 +1,17 @@
+[Unit]
+Description=TunnelBridge via tb-quick(8) for %I
+After=network-online.target nss-lookup.target
+Wants=network-online.target nss-lookup.target
+Documentation=man:tb-quick(8)
+Documentation=man:tb(8)
+Documentation=https://github.com/codefetch/tunnelbridge
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/tb-quick up %i
+ExecStop=/usr/bin/tb-quick down %i
+Environment=TB_ENDPOINT_RESOLUTION_RETRIES=infinity
+
+[Install]
+WantedBy=multi-user.target

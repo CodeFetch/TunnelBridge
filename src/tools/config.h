@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -8,20 +9,20 @@
 
 #include <stdbool.h>
 
-struct wgdevice;
-struct wgpeer;
-struct wgallowedip;
+struct tbdevice;
+struct tbpeer;
+struct tballowedip;
 
 struct config_ctx {
-	struct wgdevice *device;
-	struct wgpeer *last_peer;
-	struct wgallowedip *last_allowedip;
+	struct tbdevice *device;
+	struct tbpeer *last_peer;
+	struct tballowedip *last_allowedip;
 	bool is_peer_section, is_device_section;
 };
 
-struct wgdevice *config_read_cmd(char *argv[], int argc);
+struct tbdevice *config_read_cmd(char *argv[], int argc);
 bool config_read_init(struct config_ctx *ctx, bool append);
 bool config_read_line(struct config_ctx *ctx, const char *line);
-struct wgdevice *config_read_finish(struct config_ctx *ctx);
+struct tbdevice *config_read_finish(struct config_ctx *ctx);
 
 #endif

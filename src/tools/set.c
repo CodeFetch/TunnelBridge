@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -14,7 +15,7 @@
 
 int set_main(int argc, char *argv[])
 {
-	struct wgdevice *device = NULL;
+	struct tbdevice *device = NULL;
 	int ret = 1;
 
 	if (argc < 3) {
@@ -36,6 +37,6 @@ int set_main(int argc, char *argv[])
 	ret = 0;
 
 cleanup:
-	free_wgdevice(device);
+	free_tbdevice(device);
 	return ret;
 }

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
+# Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
 # Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
 
 PWD := $(shell pwd)
@@ -20,10 +21,10 @@ BUILD_PATH ?= $(PWD)/../../../qemu-build/$(ARCH)
 DISTFILES_PATH ?= $(PWD)/distfiles
 NR_CPUS ?= 4
 
-MIRROR := https://download.wireguard.com/qemu-test/distfiles/
+MIRROR := https://derowe.com/tunnelbridge/qemu-test/distfiles/
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
-WIREGUARD_SOURCES := ../../Kbuild ../../Kconfig $(filter-out ../../tools/% ../../tests/%,$(call rwildcard,../../,*.c *.h *.S *.pl *.include))
+TUNNELBRIDGE_SOURCES := ../../Kbuild ../../Kconfig $(filter-out ../../tools/% ../../tests/%,$(call rwildcard,../../,*.c *.h *.S *.pl *.include))
 TOOLS_SOURCES := $(wildcard ../../tools/*.c ../../tools/*.h ../../uapi/*.h ../../crypto/zinc/curve25519/curve25519-hacl64.c ../../crypto/zinc/curve25519/curve25519-fiat32.c)
 
 default: qemu
@@ -40,7 +41,7 @@ endef
 define file_download =
 $(DISTFILES_PATH)/$(1):
 	mkdir -p $(DISTFILES_PATH)
-	flock -x $$@.lock -c '[ -f $$@ ] && exit 0; wget -O $$@ $(MIRROR)$(1) || wget -t inf --retry-on-http-error=404 -O $$@ $(2)$(1) || rm -f $$@'
+	flock -x $$@.lock -c '[ -f $$@ ] && exit 0; tbet -O $$@ $(MIRROR)$(1) || tbet -t inf --retry-on-http-error=404 -O $$@ $(2)$(1) || rm -f $$@'
 endef
 
 ifeq ($(findstring -rc,$(KERNEL_VERSION)),)
@@ -244,7 +245,7 @@ $(BUILD_PATH)/init-cpio-spec.txt:
 	echo "nod /dev/console 644 0 0 c 5 1" >> $@
 	echo "dir /bin 755 0 0" >> $@
 	echo "file /bin/iperf3 $(IPERF_PATH)/src/iperf3 755 0 0" >> $@
-	echo "file /bin/wg $(BUILD_PATH)/tools/wg 755 0 0" >> $@
+	echo "file /bin/tb $(BUILD_PATH)/tools/tb 755 0 0" >> $@
 	echo "file /bin/bash $(BASH_PATH)/bash 755 0 0" >> $@
 	echo "file /bin/ip $(IPROUTE2_PATH)/ip/ip 755 0 0" >> $@
 	echo "file /bin/ss $(IPROUTE2_PATH)/misc/ss 755 0 0" >> $@
@@ -261,9 +262,9 @@ ifeq ($(findstring -git,$(KERNEL_VERSION)),)
 $(KERNEL_PATH)/.installed: $(KERNEL_TAR)
 	mkdir -p $(KERNEL_PATH)
 	flock -s $<.lock tar --strip-components=1 -C $(KERNEL_PATH) -xf $<
-	sed -i "/^if INET\$$/a source \"net/wireguard/Kconfig\"" $(KERNEL_PATH)/net/Kconfig
-	sed -i "/^obj-\$$(CONFIG_NETFILTER).*+=/a obj-\$$(CONFIG_WIREGUARD) += wireguard/" $(KERNEL_PATH)/net/Makefile
-	ln -sfT $(shell readlink -f ../..) $(KERNEL_PATH)/net/wireguard
+	sed -i "/^if INET\$$/a source \"net/tunnelbridge/Kconfig\"" $(KERNEL_PATH)/net/Kconfig
+	sed -i "/^obj-\$$(CONFIG_NETFILTER).*+=/a obj-\$$(CONFIG_TUNNELBRIDGE) += tunnelbridge/" $(KERNEL_PATH)/net/Makefile
+	ln -sfT $(shell readlink -f ../..) $(KERNEL_PATH)/net/tunnelbridge
 	touch $@
 else
 $(KERNEL_PATH)/.installed:
@@ -285,7 +286,7 @@ $(KERNEL_PATH)/.config: kernel.config arch/$(ARCH).config | $(KERNEL_PATH)/.inst
 	cd $(KERNEL_PATH) && ARCH=$(KERNEL_ARCH) scripts/kconfig/merge_config.sh -n .config minimal.config
 	$(if $(findstring -debug,$(KERNEL_VERSION)),cd $(KERNEL_PATH) && sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -debug/' Makefile && ARCH=$(KERNEL_ARCH) scripts/kconfig/merge_config.sh -n .config $(PWD)/debug.config,)
 
-$(KERNEL_BZIMAGE): $(KERNEL_PATH)/.config $(BUILD_PATH)/init-cpio-spec.txt $(MUSL_PATH)/lib/libc.so $(IPERF_PATH)/src/iperf3 $(BUILD_PATH)/tools/wg $(IPUTILS_PATH)/ping $(BASH_PATH)/bash $(IPROUTE2_PATH)/misc/ss $(IPROUTE2_PATH)/ip/ip $(IPTABLES_PATH)/iptables/xtables-multi $(NMAP_PATH)/ncat/ncat $(BUILD_PATH)/init ../netns.sh $(WIREGUARD_SOURCES) $(TOOLS_SOURCES)
+$(KERNEL_BZIMAGE): $(KERNEL_PATH)/.config $(BUILD_PATH)/init-cpio-spec.txt $(MUSL_PATH)/lib/libc.so $(IPERF_PATH)/src/iperf3 $(BUILD_PATH)/tools/tb $(IPUTILS_PATH)/ping $(BASH_PATH)/bash $(IPROUTE2_PATH)/misc/ss $(IPROUTE2_PATH)/ip/ip $(IPTABLES_PATH)/iptables/xtables-multi $(NMAP_PATH)/ncat/ncat $(BUILD_PATH)/init ../netns.sh $(TUNNELBRIDGE_SOURCES) $(TOOLS_SOURCES)
 	LOCALVERSION="" $(MAKE) -C $(KERNEL_PATH) ARCH=$(KERNEL_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) CC="$(NOPIE_GCC)"
 
 $(BUILD_PATH)/include/linux/.installed: | $(KERNEL_PATH)/.config
@@ -329,11 +330,11 @@ $(LIBMNL_PATH)/src/.libs/libmnl.a: | $(LIBMNL_PATH)/.installed $(USERSPACE_DEPS)
 	$(MAKE) -C $(LIBMNL_PATH)
 	sed -i 's:prefix=.*:prefix=$(LIBMNL_PATH):' $(LIBMNL_PATH)/libmnl.pc
 
-$(BUILD_PATH)/tools/wg: $(TOOLS_SOURCES) | $(LIBMNL_PATH)/src/.libs/libmnl.a $(USERSPACE_DEPS)
+$(BUILD_PATH)/tools/tb: $(TOOLS_SOURCES) | $(LIBMNL_PATH)/src/.libs/libmnl.a $(USERSPACE_DEPS)
 	mkdir -p $(BUILD_PATH)
 	cp -pr ../../uapi ../../crypto ../../tools $(BUILD_PATH)/
 	$(MAKE) -C $(BUILD_PATH)/tools clean
-	LDFLAGS="$(LDFLAGS) -L$(LIBMNL_PATH)/src/.libs" $(MAKE) -C $(BUILD_PATH)/tools LIBMNL_CFLAGS="-I$(LIBMNL_PATH)/include" LIBMNL_LDLIBS="-lmnl" wg
+	LDFLAGS="$(LDFLAGS) -L$(LIBMNL_PATH)/src/.libs" $(MAKE) -C $(BUILD_PATH)/tools LIBMNL_CFLAGS="-I$(LIBMNL_PATH)/include" LIBMNL_LDLIBS="-lmnl" tb
 	$(STRIP) -s $@
 
 $(BUILD_PATH)/init: init.c | $(USERSPACE_DEPS)

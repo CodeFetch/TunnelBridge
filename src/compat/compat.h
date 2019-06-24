@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#ifndef _WG_COMPAT_H
-#define _WG_COMPAT_H
+#ifndef _TB_COMPAT_H
+#define _TB_COMPAT_H
 
 #include <linux/kconfig.h>
 #include <linux/version.h>
@@ -31,7 +32,7 @@
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-#error "WireGuard requires Linux >= 3.10"
+#error "TunnelBridge requires Linux >= 3.10"
 #endif
 
 #if defined(ISRHEL7)
@@ -513,7 +514,7 @@ static inline void __compat_kvfree(const void *addr)
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0) && !defined(ISOPENSUSE15)
-#define wg_newlink(a,b,c,d,e) wg_newlink(a,b,c,d)
+#define tb_newlink(a,b,c,d,e) tb_newlink(a,b,c,d)
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
@@ -561,33 +562,33 @@ static inline struct nlattr **genl_family_attrbuf(const struct genl_family *fami
 #define __COMPAT_NETLINK_DUMP_BLOCK { \
 	int ret; \
 	skb->end -= nlmsg_total_size(sizeof(int)); \
-	ret = wg_get_device_dump_real(skb, cb); \
+	ret = tb_get_device_dump_real(skb, cb); \
 	skb->end += nlmsg_total_size(sizeof(int)); \
 	return ret; \
 }
 #define __COMPAT_NETLINK_DUMP_OVERRIDE
 #else
-#define __COMPAT_NETLINK_DUMP_BLOCK return wg_get_device_dump_real(skb, cb);
+#define __COMPAT_NETLINK_DUMP_BLOCK return tb_get_device_dump_real(skb, cb);
 #endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 8) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 25) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 87)
-#define wg_get_device_dump(a, b) wg_get_device_dump_real(a, b); \
-static int wg_get_device_dump(a, b) { \
-	struct wg_device *wg = (struct wg_device *)cb->args[0]; \
-	if (!wg) { \
-		int ret = wg_get_device_start(cb); \
+#define tb_get_device_dump(a, b) tb_get_device_dump_real(a, b); \
+static int tb_get_device_dump(a, b) { \
+	struct tb_device *tb = (struct tb_device *)cb->args[0]; \
+	if (!tb) { \
+		int ret = tb_get_device_start(cb); \
 		if (ret) \
 			return ret; \
 	} \
 	__COMPAT_NETLINK_DUMP_BLOCK \
 } \
-static int wg_get_device_dump_real(a, b)
+static int tb_get_device_dump_real(a, b)
 #define COMPAT_CANNOT_USE_NETLINK_START
 #elif defined(__COMPAT_NETLINK_DUMP_OVERRIDE)
-#define wg_get_device_dump(a, b) wg_get_device_dump_real(a, b); \
-static int wg_get_device_dump(a, b) { \
+#define tb_get_device_dump(a, b) tb_get_device_dump_real(a, b); \
+static int tb_get_device_dump(a, b) { \
 	__COMPAT_NETLINK_DUMP_BLOCK \
 } \
-static int wg_get_device_dump_real(a, b)
+static int tb_get_device_dump_real(a, b)
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
@@ -892,15 +893,15 @@ static inline void new_icmpv6_send(struct sk_buff *skb, u8 type, u8 code, __u32 
 #endif
 #if (defined(RAP_PLUGIN) || defined(CONFIG_CFI_CLANG)) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
 #include <linux/timer.h>
-#define wg_expired_retransmit_handshake(a) wg_expired_retransmit_handshake(unsigned long timer)
-#define wg_expired_send_keepalive(a) wg_expired_send_keepalive(unsigned long timer)
-#define wg_expired_new_handshake(a) wg_expired_new_handshake(unsigned long timer)
-#define wg_expired_zero_key_material(a) wg_expired_zero_key_material(unsigned long timer)
-#define wg_expired_send_persistent_keepalive(a) wg_expired_send_persistent_keepalive(unsigned long timer)
+#define tb_expired_retransmit_handshake(a) tb_expired_retransmit_handshake(unsigned long timer)
+#define tb_expired_send_keepalive(a) tb_expired_send_keepalive(unsigned long timer)
+#define tb_expired_new_handshake(a) tb_expired_new_handshake(unsigned long timer)
+#define tb_expired_zero_key_material(a) tb_expired_zero_key_material(unsigned long timer)
+#define tb_expired_send_persistent_keepalive(a) tb_expired_send_persistent_keepalive(unsigned long timer)
 #undef timer_setup
 #define timer_setup(a, b, c) setup_timer(a, ((void (*)(unsigned long))b), ((unsigned long)a))
 #undef from_timer
 #define from_timer(var, callback_timer, timer_fieldname) container_of((struct timer_list *)callback_timer, typeof(*var), timer_fieldname)
 #endif
 
-#endif /* _WG_COMPAT_H */
+#endif /* _TB_COMPAT_H */

@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -50,8 +51,8 @@ static void print_banner(void)
 	if (uname(&utsname) < 0)
 		panic("uname");
 
-	len = strlen("    WireGuard Test Suite on       ") + strlen(utsname.sysname) + strlen(utsname.release) + strlen(utsname.machine);
-	printf("\x1b[45m\x1b[33m\x1b[1m%*.s\x1b[0m\n\x1b[45m\x1b[33m\x1b[1m    WireGuard Test Suite on %s %s %s    \x1b[0m\n\x1b[45m\x1b[33m\x1b[1m%*.s\x1b[0m\n\n", len, "", utsname.sysname, utsname.release, utsname.machine, len, "");
+	len = strlen("    TunnelBridge Test Suite on       ") + strlen(utsname.sysname) + strlen(utsname.release) + strlen(utsname.machine);
+	printf("\x1b[45m\x1b[33m\x1b[1m%*.s\x1b[0m\n\x1b[45m\x1b[33m\x1b[1m    TunnelBridge Test Suite on %s %s %s    \x1b[0m\n\x1b[45m\x1b[33m\x1b[1m%*.s\x1b[0m\n\n", len, "", utsname.sysname, utsname.release, utsname.machine, len, "");
 }
 
 static void seed_rng(void)
@@ -142,12 +143,12 @@ static void kmod_selftests(void)
 	if (fcntl(fileno(file), F_SETFL, O_NONBLOCK) < 0)
 		panic("fcntl(kmsg, nonblock)");
 	while (fgets(line, sizeof(line), file)) {
-		start = strstr(line, "wireguard: ");
+		start = strstr(line, "tunnelbridge: ");
 		if (!start)
 			continue;
 		start += 11;
 		*strchrnul(start, '\n') = '\0';
-		if (strstr(start, "www.wireguard.com"))
+		if (strstr(start, "www.tunnelbridge.com"))
 			break;
 		pass = strstr(start, ": pass");
 		if (!pass || pass[6] != '\0') {
@@ -188,7 +189,7 @@ static void launch_tests(void)
 			panic("read(/proc/cmdline)");
 		cmdline[sizeof(cmdline) - 1] = '\0';
 		for (success_dev = strtok(cmdline, " \n"); success_dev; success_dev = strtok(NULL, " \n")) {
-			if (strncmp(success_dev, "wg.success=", 11))
+			if (strncmp(success_dev, "tb.success=", 11))
 				continue;
 			memcpy(success_dev + 11 - 5, "/dev/", 5);
 			success_dev += 11 - 5;

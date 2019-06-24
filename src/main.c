@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -9,7 +10,7 @@
 #include "queueing.h"
 #include "ratelimiter.h"
 #include "netlink.h"
-#include "uapi/wireguard.h"
+#include "uapi/tunnelbridge.h"
 #include "crypto/zinc.h"
 
 #include <linux/version.h>
@@ -28,42 +29,42 @@ static int __init mod_init(void)
 		return ret;
 
 #ifdef DEBUG
-	if (!wg_allowedips_selftest() || !wg_packet_counter_selftest() ||
-	    !wg_ratelimiter_selftest())
+	if (!tb_allowedips_selftest() || !tb_packet_counter_selftest() ||
+	    !tb_ratelimiter_selftest())
 		return -ENOTRECOVERABLE;
 #endif
-	wg_noise_init();
+	tb_noise_init();
 
-	ret = wg_device_init();
+	ret = tb_device_init();
 	if (ret < 0)
 		goto err_device;
 
-	ret = wg_genetlink_init();
+	ret = tb_genetlink_init();
 	if (ret < 0)
 		goto err_netlink;
 
-	pr_info("WireGuard " WIREGUARD_VERSION " loaded. See www.wireguard.com for information.\n");
-	pr_info("Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.\n");
+	pr_info("TunnelBridge " TUNNELBRIDGE_VERSION " loaded. See github.com/codefetch/tunnelbridge for information.\n");
+	pr_info("Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>. All Rights Reserved.\n");
 
 	return 0;
 
 err_netlink:
-	wg_device_uninit();
+	tb_device_uninit();
 err_device:
 	return ret;
 }
 
 static void __exit mod_exit(void)
 {
-	wg_genetlink_uninit();
-	wg_device_uninit();
+	tb_genetlink_uninit();
+	tb_device_uninit();
 }
 
 module_init(mod_init);
 module_exit(mod_exit);
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("WireGuard secure network tunnel");
-MODULE_AUTHOR("Jason A. Donenfeld <Jason@zx2c4.com>");
-MODULE_VERSION(WIREGUARD_VERSION);
+MODULE_DESCRIPTION("TunnelBridge encrypted layer 2 tunnel");
+MODULE_AUTHOR("Vincent Wiemann <vincent.wiemann@ironai.com>");
+MODULE_VERSION(TUNNELBRIDGE_VERSION);
 MODULE_ALIAS_RTNL_LINK(KBUILD_MODNAME);
-MODULE_ALIAS_GENL_FAMILY(WG_GENL_NAME);
+MODULE_ALIAS_GENL_FAMILY(TB_GENL_NAME);

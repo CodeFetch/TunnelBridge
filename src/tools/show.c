@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -27,7 +28,7 @@
 static int peer_cmp(const void *first, const void *second)
 {
 	time_t diff;
-	const struct wgpeer *a = *(const void **)first, *b = *(const void **)second;
+	const struct tbpeer *a = *(const void **)first, *b = *(const void **)second;
 
 	if (!a->last_handshake_time.tv_sec && !a->last_handshake_time.tv_nsec && (b->last_handshake_time.tv_sec || b->last_handshake_time.tv_nsec))
 		return 1;
@@ -44,19 +45,19 @@ static int peer_cmp(const void *first, const void *second)
 }
 
 /* This, hilariously, is not the right way to sort a linked list... */
-static void sort_peers(struct wgdevice *device)
+static void sort_peers(struct tbdevice *device)
 {
 	size_t peer_count = 0, i = 0;
-	struct wgpeer *peer, **peers;
+	struct tbpeer *peer, **peers;
 
-	for_each_wgpeer(device, peer)
+	for_each_tbpeer(device, peer)
 		++peer_count;
 	if (!peer_count)
 		return;
 	peers = calloc(peer_count, sizeof(*peers));
 	if (!peers)
 		return;
-	for_each_wgpeer(device, peer)
+	for_each_tbpeer(device, peer)
 		peers[i++] = peer;
 	qsort(peers, peer_count, sizeof(*peers), peer_cmp);
 	device->first_peer = peers[0];
@@ -67,31 +68,31 @@ static void sort_peers(struct wgdevice *device)
 	free(peers);
 }
 
-static char *key(const uint8_t key[static WG_KEY_LEN])
+static char *key(const uint8_t key[static TB_KEY_LEN])
 {
-	static char base64[WG_KEY_LEN_BASE64];
+	static char base64[TB_KEY_LEN_BASE64];
 
 	key_to_base64(base64, key);
 	return base64;
 }
 
-static char *maybe_key(const uint8_t maybe_key[static WG_KEY_LEN], bool have_it)
+static char *maybe_key(const uint8_t maybe_key[static TB_KEY_LEN], bool have_it)
 {
 	if (!have_it)
 		return "(none)";
 	return key(maybe_key);
 }
 
-static char *masked_key(const uint8_t masked_key[static WG_KEY_LEN])
+static char *masked_key(const uint8_t masked_key[static TB_KEY_LEN])
 {
-	const char *var = getenv("WG_HIDE_KEYS");
+	const char *var = getenv("TB_HIDE_KEYS");
 
 	if (var && !strcmp(var, "never"))
 		return key(masked_key);
 	return "(hidden)";
 }
 
-static char *ip(const struct wgallowedip *ip)
+static char *ip(const struct tballowedip *ip)
 {
 	static char buf[INET6_ADDRSTRLEN + 1];
 
@@ -205,16 +206,16 @@ static void show_usage(void)
 	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | peers | preshared-keys | endpoints | allowed-ips | latest-handshakes | transfer | persistent-keepalive | dump]\n", PROG_NAME, COMMAND_NAME);
 }
 
-static void pretty_print(struct wgdevice *device)
+static void pretty_print(struct tbdevice *device)
 {
-	struct wgpeer *peer;
-	struct wgallowedip *allowedip;
+	struct tbpeer *peer;
+	struct tballowedip *allowedip;
 
 	terminal_printf(TERMINAL_RESET);
 	terminal_printf(TERMINAL_FG_GREEN TERMINAL_BOLD "interface" TERMINAL_RESET ": " TERMINAL_FG_GREEN "%s" TERMINAL_RESET "\n", device->name);
-	if (device->flags & WGDEVICE_HAS_PUBLIC_KEY)
+	if (device->flags & TBDEVICE_HAS_PUBLIC_KEY)
 		terminal_printf("  " TERMINAL_BOLD "public key" TERMINAL_RESET ": %s\n", key(device->public_key));
-	if (device->flags & WGDEVICE_HAS_PRIVATE_KEY)
+	if (device->flags & TBDEVICE_HAS_PRIVATE_KEY)
 		terminal_printf("  " TERMINAL_BOLD "private key" TERMINAL_RESET ": %s\n", masked_key(device->private_key));
 	if (device->listen_port)
 		terminal_printf("  " TERMINAL_BOLD "listening port" TERMINAL_RESET ": %u\n", device->listen_port);
@@ -224,15 +225,15 @@ static void pretty_print(struct wgdevice *device)
 		sort_peers(device);
 		terminal_printf("\n");
 	}
-	for_each_wgpeer(device, peer) {
+	for_each_tbpeer(device, peer) {
 		terminal_printf(TERMINAL_FG_YELLOW TERMINAL_BOLD "peer" TERMINAL_RESET ": " TERMINAL_FG_YELLOW "%s" TERMINAL_RESET "\n", key(peer->public_key));
-		if (peer->flags & WGPEER_HAS_PRESHARED_KEY)
+		if (peer->flags & TBPEER_HAS_PRESHARED_KEY)
 			terminal_printf("  " TERMINAL_BOLD "preshared key" TERMINAL_RESET ": %s\n", masked_key(peer->preshared_key));
 		if (peer->endpoint.addr.sa_family == AF_INET || peer->endpoint.addr.sa_family == AF_INET6)
 			terminal_printf("  " TERMINAL_BOLD "endpoint" TERMINAL_RESET ": %s\n", endpoint(&peer->endpoint.addr));
 		terminal_printf("  " TERMINAL_BOLD "allowed ips" TERMINAL_RESET ": ");
 		if (peer->first_allowedip) {
-			for_each_wgallowedip(peer, allowedip)
+			for_each_tballowedip(peer, allowedip)
 				terminal_printf("%s" TERMINAL_FG_CYAN "/" TERMINAL_RESET "%u%s", ip(allowedip), allowedip->cidr, allowedip->next_allowedip ? ", " : "\n");
 		} else
 			terminal_printf("(none)\n");
@@ -250,31 +251,31 @@ static void pretty_print(struct wgdevice *device)
 	}
 }
 
-static void dump_print(struct wgdevice *device, bool with_interface)
+static void dump_print(struct tbdevice *device, bool with_interface)
 {
-	struct wgpeer *peer;
-	struct wgallowedip *allowedip;
+	struct tbpeer *peer;
+	struct tballowedip *allowedip;
 
 	if (with_interface)
 		printf("%s\t", device->name);
-	printf("%s\t", maybe_key(device->private_key, device->flags & WGDEVICE_HAS_PRIVATE_KEY));
-	printf("%s\t", maybe_key(device->public_key, device->flags & WGDEVICE_HAS_PUBLIC_KEY));
+	printf("%s\t", maybe_key(device->private_key, device->flags & TBDEVICE_HAS_PRIVATE_KEY));
+	printf("%s\t", maybe_key(device->public_key, device->flags & TBDEVICE_HAS_PUBLIC_KEY));
 	printf("%u\t", device->listen_port);
 	if (device->fwmark)
 		printf("0x%x\n", device->fwmark);
 	else
 		printf("off\n");
-	for_each_wgpeer(device, peer) {
+	for_each_tbpeer(device, peer) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%s\t", key(peer->public_key));
-		printf("%s\t", maybe_key(peer->preshared_key, peer->flags & WGPEER_HAS_PRESHARED_KEY));
+		printf("%s\t", maybe_key(peer->preshared_key, peer->flags & TBPEER_HAS_PRESHARED_KEY));
 		if (peer->endpoint.addr.sa_family == AF_INET || peer->endpoint.addr.sa_family == AF_INET6)
 			printf("%s\t", endpoint(&peer->endpoint.addr));
 		else
 			printf("(none)\t");
 		if (peer->first_allowedip) {
-			for_each_wgallowedip(peer, allowedip)
+			for_each_tballowedip(peer, allowedip)
 				printf("%s/%u%c", ip(allowedip), allowedip->cidr, allowedip->next_allowedip ? ',' : '\t');
 		} else
 			printf("(none)\t");
@@ -287,19 +288,19 @@ static void dump_print(struct wgdevice *device, bool with_interface)
 	}
 }
 
-static bool ugly_print(struct wgdevice *device, const char *param, bool with_interface)
+static bool ugly_print(struct tbdevice *device, const char *param, bool with_interface)
 {
-	struct wgpeer *peer;
-	struct wgallowedip *allowedip;
+	struct tbpeer *peer;
+	struct tballowedip *allowedip;
 
 	if (!strcmp(param, "public-key")) {
 		if (with_interface)
 			printf("%s\t", device->name);
-		printf("%s\n", maybe_key(device->public_key, device->flags & WGDEVICE_HAS_PUBLIC_KEY));
+		printf("%s\n", maybe_key(device->public_key, device->flags & TBDEVICE_HAS_PUBLIC_KEY));
 	} else if (!strcmp(param, "private-key")) {
 		if (with_interface)
 			printf("%s\t", device->name);
-		printf("%s\n", maybe_key(device->private_key, device->flags & WGDEVICE_HAS_PRIVATE_KEY));
+		printf("%s\n", maybe_key(device->private_key, device->flags & TBDEVICE_HAS_PRIVATE_KEY));
 	} else if (!strcmp(param, "listen-port")) {
 		if (with_interface)
 			printf("%s\t", device->name);
@@ -314,7 +315,7 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
 	} else if (!strcmp(param, "endpoints")) {
 		if (with_interface)
 			printf("%s\t", device->name);
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			printf("%s\t", key(peer->public_key));
 			if (peer->endpoint.addr.sa_family == AF_INET || peer->endpoint.addr.sa_family == AF_INET6)
 				printf("%s\n", endpoint(&peer->endpoint.addr));
@@ -322,30 +323,30 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
 				printf("(none)\n");
 		}
 	} else if (!strcmp(param, "allowed-ips")) {
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);
 			printf("%s\t", key(peer->public_key));
 			if (peer->first_allowedip) {
-				for_each_wgallowedip(peer, allowedip)
+				for_each_tballowedip(peer, allowedip)
 					printf("%s/%u%c", ip(allowedip), allowedip->cidr, allowedip->next_allowedip ? ' ' : '\n');
 			} else
 				printf("(none)\n");
 		}
 	} else if (!strcmp(param, "latest-handshakes")) {
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);
 			printf("%s\t%llu\n", key(peer->public_key), (unsigned long long)peer->last_handshake_time.tv_sec);
 		}
 	} else if (!strcmp(param, "transfer")) {
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);
 			printf("%s\t%" PRIu64 "\t%" PRIu64 "\n", key(peer->public_key), (uint64_t)peer->rx_bytes, (uint64_t)peer->tx_bytes);
 		}
 	} else if (!strcmp(param, "persistent-keepalive")) {
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);
 			if (peer->persistent_keepalive_interval)
@@ -354,14 +355,14 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
 				printf("%s\toff\n", key(peer->public_key));
 		}
 	} else if (!strcmp(param, "preshared-keys")) {
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);
 			printf("%s\t", key(peer->public_key));
-			printf("%s\n", maybe_key(peer->preshared_key, peer->flags & WGPEER_HAS_PRESHARED_KEY));
+			printf("%s\n", maybe_key(peer->preshared_key, peer->flags & TBPEER_HAS_PRESHARED_KEY));
 		}
 	} else if (!strcmp(param, "peers")) {
-		for_each_wgpeer(device, peer) {
+		for_each_tbpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);
 			printf("%s\n", key(peer->public_key));
@@ -397,7 +398,7 @@ int show_main(int argc, char *argv[])
 		ret = !!*interfaces;
 		interface = interfaces;
 		for (size_t len = 0; (len = strlen(interface)); interface += len + 1) {
-			struct wgdevice *device = NULL;
+			struct tbdevice *device = NULL;
 
 			if (ipc_get_device(&device, interface) < 0) {
 				fprintf(stderr, "Unable to access interface %s: %s\n", interface, strerror(errno));
@@ -406,7 +407,7 @@ int show_main(int argc, char *argv[])
 			if (argc == 3) {
 				if (!ugly_print(device, argv[2], true)) {
 					ret = 1;
-					free_wgdevice(device);
+					free_tbdevice(device);
 					break;
 				}
 			} else {
@@ -414,7 +415,7 @@ int show_main(int argc, char *argv[])
 				if (strlen(interface + len + 1))
 					printf("\n");
 			}
-			free_wgdevice(device);
+			free_tbdevice(device);
 			ret = 0;
 		}
 		free(interfaces);
@@ -437,7 +438,7 @@ int show_main(int argc, char *argv[])
 	} else if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")))
 		show_usage();
 	else {
-		struct wgdevice *device = NULL;
+		struct tbdevice *device = NULL;
 
 		if (ipc_get_device(&device, argv[1]) < 0) {
 			perror("Unable to access interface");
@@ -448,7 +449,7 @@ int show_main(int argc, char *argv[])
 				ret = 1;
 		} else
 			pretty_print(device);
-		free_wgdevice(device);
+		free_tbdevice(device);
 	}
 	return ret;
 }

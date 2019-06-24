@@ -4,7 +4,7 @@ cscope.out
 *.dwo
 *.ko
 *.mod.c
-src/tools/wg
+src/tools/tb
 Module.symvers
 *.cmd
 .tmp_versions

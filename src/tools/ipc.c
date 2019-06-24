@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -38,9 +39,9 @@
 #include "containers.h"
 #include "encoding.h"
 #include "curve25519.h"
-#include "../uapi/wireguard.h"
+#include "../uapi/tunnelbridge.h"
 
-#define SOCK_PATH RUNSTATEDIR "/wireguard/"
+#define SOCK_PATH RUNSTATEDIR "/tunnelbridge/"
 #define SOCK_SUFFIX ".sock"
 #ifdef __linux__
 #define SOCKET_BUFFER_SIZE MNL_SOCKET_BUFFER_SIZE
@@ -140,7 +141,7 @@ out:
 	return f;
 }
 
-static bool userspace_has_wireguard_interface(const char *interface)
+static bool userspace_has_tunnelbridge_interface(const char *interface)
 {
 	struct stat sbuf;
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
@@ -167,7 +168,7 @@ static bool userspace_has_wireguard_interface(const char *interface)
 	return true;
 }
 
-static int userspace_get_wireguard_interfaces(struct inflatable_buffer *buffer)
+static int userspace_get_tunnelbridge_interfaces(struct inflatable_buffer *buffer)
 {
 	DIR *dir;
 	struct dirent *ent;
@@ -186,7 +187,7 @@ static int userspace_get_wireguard_interfaces(struct inflatable_buffer *buffer)
 		if (strncmp(end, SOCK_SUFFIX, strlen(SOCK_SUFFIX)))
 			continue;
 		*end = '\0';
-		if (!userspace_has_wireguard_interface(ent->d_name))
+		if (!userspace_has_tunnelbridge_interface(ent->d_name))
 			continue;
 		buffer->next = strdup(ent->d_name);
 		buffer->good = true;
@@ -202,11 +203,11 @@ out:
 #include "wincompat/ipc.c"
 #endif
 
-static int userspace_set_device(struct wgdevice *dev)
+static int userspace_set_device(struct tbdevice *dev)
 {
-	char hex[WG_KEY_LEN_HEX], ip[INET6_ADDRSTRLEN], host[4096 + 1], service[512 + 1];
-	struct wgpeer *peer;
-	struct wgallowedip *allowedip;
+	char hex[TB_KEY_LEN_HEX], ip[INET6_ADDRSTRLEN], host[4096 + 1], service[512 + 1];
+	struct tbpeer *peer;
+	struct tballowedip *allowedip;
 	FILE *f;
 	int ret;
 	socklen_t addr_len;
@@ -216,25 +217,23 @@ static int userspace_set_device(struct wgdevice *dev)
 		return -errno;
 	fprintf(f, "set=1\n");
 
-	if (dev->flags & WGDEVICE_HAS_PRIVATE_KEY) {
+	if (dev->flags & TBDEVICE_HAS_PRIVATE_KEY) {
 		key_to_hex(hex, dev->private_key);
 		fprintf(f, "private_key=%s\n", hex);
 	}
-	if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
+	if (dev->flags & TBDEVICE_HAS_LISTEN_PORT)
 		fprintf(f, "listen_port=%u\n", dev->listen_port);
-	if (dev->flags & WGDEVICE_HAS_FWMARK)
-		fprintf(f, "fwmark=%u\n", dev->fwmark);
-	if (dev->flags & WGDEVICE_REPLACE_PEERS)
+	if (dev->flags & TBDEVICE_REPLACE_PEERS)
 		fprintf(f, "replace_peers=true\n");
 
-	for_each_wgpeer(dev, peer) {
+	for_each_tbpeer(dev, peer) {
 		key_to_hex(hex, peer->public_key);
 		fprintf(f, "public_key=%s\n", hex);
-		if (peer->flags & WGPEER_REMOVE_ME) {
+		if (peer->flags & TBPEER_REMOVE_ME) {
 			fprintf(f, "remove=true\n");
 			continue;
 		}
-		if (peer->flags & WGPEER_HAS_PRESHARED_KEY) {
+		if (peer->flags & TBPEER_HAS_PRESHARED_KEY) {
 			key_to_hex(hex, peer->preshared_key);
 			fprintf(f, "preshared_key=%s\n", hex);
 		}
@@ -251,21 +250,8 @@ static int userspace_set_device(struct wgdevice *dev)
 					fprintf(f, "endpoint=%s:%s\n", host, service);
 			}
 		}
-		if (peer->flags & WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL)
+		if (peer->flags & TBPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL)
 			fprintf(f, "persistent_keepalive_interval=%u\n", peer->persistent_keepalive_interval);
-		if (peer->flags & WGPEER_REPLACE_ALLOWEDIPS)
-			fprintf(f, "replace_allowed_ips=true\n");
-		for_each_wgallowedip(peer, allowedip) {
-			if (allowedip->family == AF_INET) {
-				if (!inet_ntop(AF_INET, &allowedip->ip4, ip, INET6_ADDRSTRLEN))
-					continue;
-			} else if (allowedip->family == AF_INET6) {
-				if (!inet_ntop(AF_INET6, &allowedip->ip6, ip, INET6_ADDRSTRLEN))
-					continue;
-			} else
-				continue;
-			fprintf(f, "allowed_ip=%s/%d\n", ip, allowedip->cidr);
-		}
 	}
 	fprintf(f, "\n");
 	fflush(f);
@@ -288,11 +274,11 @@ static int userspace_set_device(struct wgdevice *dev)
 	num; \
 })
 
-static int userspace_get_device(struct wgdevice **out, const char *interface)
+static int userspace_get_device(struct tbdevice **out, const char *interface)
 {
-	struct wgdevice *dev;
-	struct wgpeer *peer = NULL;
-	struct wgallowedip *allowedip = NULL;
+	struct tbdevice *dev;
+	struct tbpeer *peer = NULL;
+	struct tballowedip *allowedip = NULL;
 	size_t line_buffer_len = 0, line_len;
 	char *key = NULL, *value;
 	FILE *f;
@@ -328,15 +314,12 @@ static int userspace_get_device(struct wgdevice **out, const char *interface)
 			if (!key_from_hex(dev->private_key, value))
 				break;
 			curve25519_generate_public(dev->public_key, dev->private_key);
-			dev->flags |= WGDEVICE_HAS_PRIVATE_KEY | WGDEVICE_HAS_PUBLIC_KEY;
+			dev->flags |= TBDEVICE_HAS_PRIVATE_KEY | TBDEVICE_HAS_PUBLIC_KEY;
 		} else if (!peer && !strcmp(key, "listen_port")) {
 			dev->listen_port = NUM(0xffffU);
-			dev->flags |= WGDEVICE_HAS_LISTEN_PORT;
-		} else if (!peer && !strcmp(key, "fwmark")) {
-			dev->fwmark = NUM(0xffffffffU);
-			dev->flags |= WGDEVICE_HAS_FWMARK;
+			dev->flags |= TBDEVICE_HAS_LISTEN_PORT;
 		} else if (!strcmp(key, "public_key")) {
-			struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
+			struct tbpeer *new_peer = calloc(1, sizeof(*new_peer));
 
 			if (!new_peer) {
 				ret = -ENOMEM;
@@ -350,12 +333,12 @@ static int userspace_get_device(struct wgdevice **out, const char *interface)
 			peer = new_peer;
 			if (!key_from_hex(peer->public_key, value))
 				break;
-			peer->flags |= WGPEER_HAS_PUBLIC_KEY;
+			peer->flags |= TBPEER_HAS_PUBLIC_KEY;
 		} else if (peer && !strcmp(key, "preshared_key")) {
 			if (!key_from_hex(peer->preshared_key, value))
 				break;
 			if (!key_is_zero(peer->preshared_key))
-				peer->flags |= WGPEER_HAS_PRESHARED_KEY;
+				peer->flags |= TBPEER_HAS_PRESHARED_KEY;
 		} else if (peer && !strcmp(key, "endpoint")) {
 			char *begin, *end;
 			struct addrinfo *resolved;
@@ -395,34 +378,7 @@ static int userspace_get_device(struct wgdevice **out, const char *interface)
 			freeaddrinfo(resolved);
 		} else if (peer && !strcmp(key, "persistent_keepalive_interval")) {
 			peer->persistent_keepalive_interval = NUM(0xffffU);
-			peer->flags |= WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL;
-		} else if (peer && !strcmp(key, "allowed_ip")) {
-			struct wgallowedip *new_allowedip;
-			char *end, *mask = value, *ip = strsep(&mask, "/");
-
-			if (!mask || !isdigit(mask[0]))
-				break;
-			new_allowedip = calloc(1, sizeof(*new_allowedip));
-			if (!new_allowedip) {
-				ret = -ENOMEM;
-				goto err;
-			}
-			if (allowedip)
-				allowedip->next_allowedip = new_allowedip;
-			else
-				peer->first_allowedip = new_allowedip;
-			allowedip = new_allowedip;
-			allowedip->family = AF_UNSPEC;
-			if (strchr(ip, ':')) {
-				if (inet_pton(AF_INET6, ip, &allowedip->ip6) == 1)
-					allowedip->family = AF_INET6;
-			} else {
-				if (inet_pton(AF_INET, ip, &allowedip->ip4) == 1)
-					allowedip->family = AF_INET;
-			}
-			allowedip->cidr = strtoul(mask, &end, 10);
-			if (*end || allowedip->family == AF_UNSPEC || (allowedip->family == AF_INET6 && allowedip->cidr > 128) || (allowedip->family == AF_INET && allowedip->cidr > 32))
-				break;
+			peer->flags |= TBPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL;
 		} else if (peer && !strcmp(key, "last_handshake_time_sec"))
 			peer->last_handshake_time.tv_sec = NUM(0x7fffffffffffffffULL);
 		else if (peer && !strcmp(key, "last_handshake_time_nsec"))
@@ -437,7 +393,7 @@ static int userspace_get_device(struct wgdevice **out, const char *interface)
 	ret = -EPROTO;
 err:
 	free(key);
-	free_wgdevice(dev);
+	free_tbdevice(dev);
 	*out = NULL;
 	fclose(f);
 	errno = -ret;
@@ -452,7 +408,7 @@ static int parse_linkinfo(const struct nlattr *attr, void *data)
 {
 	struct inflatable_buffer *buffer = data;
 
-	if (mnl_attr_get_type(attr) == IFLA_INFO_KIND && !strcmp("wireguard", mnl_attr_get_str(attr)))
+	if (mnl_attr_get_type(attr) == IFLA_INFO_KIND && !strcmp("tunnelbridge", mnl_attr_get_str(attr)))
 		buffer->good = true;
 	return MNL_CB_OK;
 }
@@ -486,7 +442,7 @@ static int read_devices_cb(const struct nlmsghdr *nlh, void *data)
 	return MNL_CB_OK;
 }
 
-static int kernel_get_wireguard_interfaces(struct inflatable_buffer *buffer)
+static int kernel_get_tunnelbridge_interfaces(struct inflatable_buffer *buffer)
 {
 	struct mnl_socket *nl = NULL;
 	char *rtnl_buffer = NULL;
@@ -555,94 +511,94 @@ cleanup:
 	return ret;
 }
 
-static int kernel_set_device(struct wgdevice *dev)
+static int kernel_set_device(struct tbdevice *dev)
 {
 	int ret = 0;
-	struct wgpeer *peer = NULL;
-	struct wgallowedip *allowedip = NULL;
+	struct tbpeer *peer = NULL;
+	struct tballowedip *allowedip = NULL;
 	struct nlattr *peers_nest, *peer_nest, *allowedips_nest, *allowedip_nest;
 	struct nlmsghdr *nlh;
 	struct mnlg_socket *nlg;
 
-	nlg = mnlg_socket_open(WG_GENL_NAME, WG_GENL_VERSION);
+	nlg = mnlg_socket_open(TB_GENL_NAME, TB_GENL_VERSION);
 	if (!nlg)
 		return -errno;
 
 again:
-	nlh = mnlg_msg_prepare(nlg, WG_CMD_SET_DEVICE, NLM_F_REQUEST | NLM_F_ACK);
-	mnl_attr_put_strz(nlh, WGDEVICE_A_IFNAME, dev->name);
+	nlh = mnlg_msg_prepare(nlg, TB_CMD_SET_DEVICE, NLM_F_REQUEST | NLM_F_ACK);
+	mnl_attr_put_strz(nlh, TBDEVICE_A_IFNAME, dev->name);
 
 	if (!peer) {
 		uint32_t flags = 0;
 
-		if (dev->flags & WGDEVICE_HAS_PRIVATE_KEY)
-			mnl_attr_put(nlh, WGDEVICE_A_PRIVATE_KEY, sizeof(dev->private_key), dev->private_key);
-		if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
-			mnl_attr_put_u16(nlh, WGDEVICE_A_LISTEN_PORT, dev->listen_port);
-		if (dev->flags & WGDEVICE_HAS_FWMARK)
-			mnl_attr_put_u32(nlh, WGDEVICE_A_FWMARK, dev->fwmark);
-		if (dev->flags & WGDEVICE_REPLACE_PEERS)
-			flags |= WGDEVICE_F_REPLACE_PEERS;
+		if (dev->flags & TBDEVICE_HAS_PRIVATE_KEY)
+			mnl_attr_put(nlh, TBDEVICE_A_PRIVATE_KEY, sizeof(dev->private_key), dev->private_key);
+		if (dev->flags & TBDEVICE_HAS_LISTEN_PORT)
+			mnl_attr_put_u16(nlh, TBDEVICE_A_LISTEN_PORT, dev->listen_port);
+		if (dev->flags & TBDEVICE_HAS_FWMARK)
+			mnl_attr_put_u32(nlh, TBDEVICE_A_FWMARK, dev->fwmark);
+		if (dev->flags & TBDEVICE_REPLACE_PEERS)
+			flags |= TBDEVICE_F_REPLACE_PEERS;
 		if (flags)
-			mnl_attr_put_u32(nlh, WGDEVICE_A_FLAGS, flags);
+			mnl_attr_put_u32(nlh, TBDEVICE_A_FLAGS, flags);
 	}
 	if (!dev->first_peer)
 		goto send;
 	peers_nest = peer_nest = allowedips_nest = allowedip_nest = NULL;
-	peers_nest = mnl_attr_nest_start(nlh, WGDEVICE_A_PEERS);
+	peers_nest = mnl_attr_nest_start(nlh, TBDEVICE_A_PEERS);
 	for (peer = peer ? peer : dev->first_peer; peer; peer = peer->next_peer) {
 		uint32_t flags = 0;
 
 		peer_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, 0);
 		if (!peer_nest)
 			goto toobig_peers;
-		if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PUBLIC_KEY, sizeof(peer->public_key), peer->public_key))
+		if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_PUBLIC_KEY, sizeof(peer->public_key), peer->public_key))
 			goto toobig_peers;
-		if (peer->flags & WGPEER_REMOVE_ME)
-			flags |= WGPEER_F_REMOVE_ME;
+		if (peer->flags & TBPEER_REMOVE_ME)
+			flags |= TBPEER_F_REMOVE_ME;
 		if (!allowedip) {
-			if (peer->flags & WGPEER_REPLACE_ALLOWEDIPS)
-				flags |= WGPEER_F_REPLACE_ALLOWEDIPS;
-			if (peer->flags & WGPEER_HAS_PRESHARED_KEY) {
-				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PRESHARED_KEY, sizeof(peer->preshared_key), peer->preshared_key))
+			if (peer->flags & TBPEER_REPLACE_ALLOWEDIPS)
+				flags |= TBPEER_F_REPLACE_ALLOWEDIPS;
+			if (peer->flags & TBPEER_HAS_PRESHARED_KEY) {
+				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_PRESHARED_KEY, sizeof(peer->preshared_key), peer->preshared_key))
 					goto toobig_peers;
 			}
 			if (peer->endpoint.addr.sa_family == AF_INET) {
-				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ENDPOINT, sizeof(peer->endpoint.addr4), &peer->endpoint.addr4))
+				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_ENDPOINT, sizeof(peer->endpoint.addr4), &peer->endpoint.addr4))
 					goto toobig_peers;
 			} else if (peer->endpoint.addr.sa_family == AF_INET6) {
-				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ENDPOINT, sizeof(peer->endpoint.addr6), &peer->endpoint.addr6))
+				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_ENDPOINT, sizeof(peer->endpoint.addr6), &peer->endpoint.addr6))
 					goto toobig_peers;
 			}
-			if (peer->flags & WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL) {
-				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL, peer->persistent_keepalive_interval))
+			if (peer->flags & TBPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL) {
+				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_PERSISTENT_KEEPALIVE_INTERVAL, peer->persistent_keepalive_interval))
 					goto toobig_peers;
 			}
 		}
 		if (flags) {
-			if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_FLAGS, flags))
+			if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_FLAGS, flags))
 				goto toobig_peers;
 		}
 		if (peer->first_allowedip) {
 			if (!allowedip)
 				allowedip = peer->first_allowedip;
-			allowedips_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ALLOWEDIPS);
+			allowedips_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_ALLOWEDIPS);
 			if (!allowedips_nest)
 				goto toobig_allowedips;
 			for (; allowedip; allowedip = allowedip->next_allowedip) {
 				allowedip_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, 0);
 				if (!allowedip_nest)
 					goto toobig_allowedips;
-				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_FAMILY, allowedip->family))
+				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_FAMILY, allowedip->family))
 					goto toobig_allowedips;
 				if (allowedip->family == AF_INET) {
-					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_IPADDR, sizeof(allowedip->ip4), &allowedip->ip4))
+					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_IPADDR, sizeof(allowedip->ip4), &allowedip->ip4))
 						goto toobig_allowedips;
 				} else if (allowedip->family == AF_INET6) {
-					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_IPADDR, sizeof(allowedip->ip6), &allowedip->ip6))
+					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_IPADDR, sizeof(allowedip->ip6), &allowedip->ip6))
 						goto toobig_allowedips;
 				}
-				if (!mnl_attr_put_u8_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_CIDR_MASK, allowedip->cidr))
+				if (!mnl_attr_put_u8_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_CIDR_MASK, allowedip->cidr))
 					goto toobig_allowedips;
 				mnl_attr_nest_end(nlh, allowedip_nest);
 				allowedip_nest = NULL;
@@ -691,22 +647,22 @@ out:
 
 static int parse_allowedip(const struct nlattr *attr, void *data)
 {
-	struct wgallowedip *allowedip = data;
+	struct tballowedip *allowedip = data;
 
 	switch (mnl_attr_get_type(attr)) {
-	case WGALLOWEDIP_A_UNSPEC:
+	case TBALLOWEDIP_A_UNSPEC:
 		break;
-	case WGALLOWEDIP_A_FAMILY:
+	case TBALLOWEDIP_A_FAMILY:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U16))
 			allowedip->family = mnl_attr_get_u16(attr);
 		break;
-	case WGALLOWEDIP_A_IPADDR:
+	case TBALLOWEDIP_A_IPADDR:
 		if (mnl_attr_get_payload_len(attr) == sizeof(allowedip->ip4))
 			memcpy(&allowedip->ip4, mnl_attr_get_payload(attr), sizeof(allowedip->ip4));
 		else if (mnl_attr_get_payload_len(attr) == sizeof(allowedip->ip6))
 			memcpy(&allowedip->ip6, mnl_attr_get_payload(attr), sizeof(allowedip->ip6));
 		break;
-	case WGALLOWEDIP_A_CIDR_MASK:
+	case TBALLOWEDIP_A_CIDR_MASK:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U8))
 			allowedip->cidr = mnl_attr_get_u8(attr);
 		break;
@@ -717,8 +673,8 @@ static int parse_allowedip(const struct nlattr *attr, void *data)
 
 static int parse_allowedips(const struct nlattr *attr, void *data)
 {
-	struct wgpeer *peer = data;
-	struct wgallowedip *new_allowedip = calloc(1, sizeof(*new_allowedip));
+	struct tbpeer *peer = data;
+	struct tballowedip *new_allowedip = calloc(1, sizeof(*new_allowedip));
 	int ret;
 
 	if (!new_allowedip) {
@@ -741,25 +697,25 @@ static int parse_allowedips(const struct nlattr *attr, void *data)
 
 static int parse_peer(const struct nlattr *attr, void *data)
 {
-	struct wgpeer *peer = data;
+	struct tbpeer *peer = data;
 
 	switch (mnl_attr_get_type(attr)) {
-	case WGPEER_A_UNSPEC:
+	case TBPEER_A_UNSPEC:
 		break;
-	case WGPEER_A_PUBLIC_KEY:
+	case TBPEER_A_PUBLIC_KEY:
 		if (mnl_attr_get_payload_len(attr) == sizeof(peer->public_key)) {
 			memcpy(peer->public_key, mnl_attr_get_payload(attr), sizeof(peer->public_key));
-			peer->flags |= WGPEER_HAS_PUBLIC_KEY;
+			peer->flags |= TBPEER_HAS_PUBLIC_KEY;
 		}
 		break;
-	case WGPEER_A_PRESHARED_KEY:
+	case TBPEER_A_PRESHARED_KEY:
 		if (mnl_attr_get_payload_len(attr) == sizeof(peer->preshared_key)) {
 			memcpy(peer->preshared_key, mnl_attr_get_payload(attr), sizeof(peer->preshared_key));
 			if (!key_is_zero(peer->preshared_key))
-				peer->flags |= WGPEER_HAS_PRESHARED_KEY;
+				peer->flags |= TBPEER_HAS_PRESHARED_KEY;
 		}
 		break;
-	case WGPEER_A_ENDPOINT: {
+	case TBPEER_A_ENDPOINT: {
 		struct sockaddr *addr;
 
 		if (mnl_attr_get_payload_len(attr) < sizeof(*addr))
@@ -771,24 +727,22 @@ static int parse_peer(const struct nlattr *attr, void *data)
 			memcpy(&peer->endpoint.addr6, addr, sizeof(peer->endpoint.addr6));
 		break;
 	}
-	case WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL:
+	case TBPEER_A_PERSISTENT_KEEPALIVE_INTERVAL:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U16))
 			peer->persistent_keepalive_interval = mnl_attr_get_u16(attr);
 		break;
-	case WGPEER_A_LAST_HANDSHAKE_TIME:
+	case TBPEER_A_LAST_HANDSHAKE_TIME:
 		if (mnl_attr_get_payload_len(attr) == sizeof(peer->last_handshake_time))
 			memcpy(&peer->last_handshake_time, mnl_attr_get_payload(attr), sizeof(peer->last_handshake_time));
 		break;
-	case WGPEER_A_RX_BYTES:
+	case TBPEER_A_RX_BYTES:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U64))
 			peer->rx_bytes = mnl_attr_get_u64(attr);
 		break;
-	case WGPEER_A_TX_BYTES:
+	case TBPEER_A_TX_BYTES:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U64))
 			peer->tx_bytes = mnl_attr_get_u64(attr);
 		break;
-	case WGPEER_A_ALLOWEDIPS:
-		return mnl_attr_parse_nested(attr, parse_allowedips, peer);
 	}
 
 	return MNL_CB_OK;
@@ -796,8 +750,8 @@ static int parse_peer(const struct nlattr *attr, void *data)
 
 static int parse_peers(const struct nlattr *attr, void *data)
 {
-	struct wgdevice *device = data;
-	struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
+	struct tbdevice *device = data;
+	struct tbpeer *new_peer = calloc(1, sizeof(*new_peer));
 	int ret;
 
 	if (!new_peer) {
@@ -813,49 +767,49 @@ static int parse_peers(const struct nlattr *attr, void *data)
 	ret = mnl_attr_parse_nested(attr, parse_peer, new_peer);
 	if (!ret)
 		return ret;
-	if (!(new_peer->flags & WGPEER_HAS_PUBLIC_KEY))
+	if (!(new_peer->flags & TBPEER_HAS_PUBLIC_KEY))
 		return MNL_CB_ERROR;
 	return MNL_CB_OK;
 }
 
 static int parse_device(const struct nlattr *attr, void *data)
 {
-	struct wgdevice *device = data;
+	struct tbdevice *device = data;
 
 	switch (mnl_attr_get_type(attr)) {
-	case WGDEVICE_A_UNSPEC:
+	case TBDEVICE_A_UNSPEC:
 		break;
-	case WGDEVICE_A_IFINDEX:
+	case TBDEVICE_A_IFINDEX:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U32))
 			device->ifindex = mnl_attr_get_u32(attr);
 		break;
-	case WGDEVICE_A_IFNAME:
+	case TBDEVICE_A_IFNAME:
 		if (!mnl_attr_validate(attr, MNL_TYPE_STRING)) {
 			strncpy(device->name, mnl_attr_get_str(attr), sizeof(device->name) - 1);
 			device->name[sizeof(device->name) - 1] = '\0';
 		}
 		break;
-	case WGDEVICE_A_PRIVATE_KEY:
+	case TBDEVICE_A_PRIVATE_KEY:
 		if (mnl_attr_get_payload_len(attr) == sizeof(device->private_key)) {
 			memcpy(device->private_key, mnl_attr_get_payload(attr), sizeof(device->private_key));
-			device->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+			device->flags |= TBDEVICE_HAS_PRIVATE_KEY;
 		}
 		break;
-	case WGDEVICE_A_PUBLIC_KEY:
+	case TBDEVICE_A_PUBLIC_KEY:
 		if (mnl_attr_get_payload_len(attr) == sizeof(device->public_key)) {
 			memcpy(device->public_key, mnl_attr_get_payload(attr), sizeof(device->public_key));
-			device->flags |= WGDEVICE_HAS_PUBLIC_KEY;
+			device->flags |= TBDEVICE_HAS_PUBLIC_KEY;
 		}
 		break;
-	case WGDEVICE_A_LISTEN_PORT:
+	case TBDEVICE_A_LISTEN_PORT:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U16))
 			device->listen_port = mnl_attr_get_u16(attr);
 		break;
-	case WGDEVICE_A_FWMARK:
+	case TBDEVICE_A_FWMARK:
 		if (!mnl_attr_validate(attr, MNL_TYPE_U32))
 			device->fwmark = mnl_attr_get_u32(attr);
 		break;
-	case WGDEVICE_A_PEERS:
+	case TBDEVICE_A_PEERS:
 		return mnl_attr_parse_nested(attr, parse_peers, device);
 	}
 
@@ -867,12 +821,12 @@ static int read_device_cb(const struct nlmsghdr *nlh, void *data)
 	return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), parse_device, data);
 }
 
-static void coalesce_peers(struct wgdevice *device)
+static void coalesce_peers(struct tbdevice *device)
 {
-	struct wgpeer *old_next_peer, *peer = device->first_peer;
+	struct tbpeer *old_next_peer, *peer = device->first_peer;
 
 	while (peer && peer->next_peer) {
-		if (memcmp(peer->public_key, peer->next_peer->public_key, WG_KEY_LEN)) {
+		if (memcmp(peer->public_key, peer->next_peer->public_key, TB_KEY_LEN)) {
 			peer = peer->next_peer;
 			continue;
 		}
@@ -889,7 +843,7 @@ static void coalesce_peers(struct wgdevice *device)
 	}
 }
 
-static int kernel_get_device(struct wgdevice **device, const char *interface)
+static int kernel_get_device(struct tbdevice **device, const char *interface)
 {
 	int ret = 0;
 	struct nlmsghdr *nlh;
@@ -900,15 +854,15 @@ try_again:
 	if (!*device)
 		return -errno;
 
-	nlg = mnlg_socket_open(WG_GENL_NAME, WG_GENL_VERSION);
+	nlg = mnlg_socket_open(TB_GENL_NAME, TB_GENL_VERSION);
 	if (!nlg) {
-		free_wgdevice(*device);
+		free_tbdevice(*device);
 		*device = NULL;
 		return -errno;
 	}
 
-	nlh = mnlg_msg_prepare(nlg, WG_CMD_GET_DEVICE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_DUMP);
-	mnl_attr_put_strz(nlh, WGDEVICE_A_IFNAME, interface);
+	nlh = mnlg_msg_prepare(nlg, TB_CMD_GET_DEVICE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_DUMP);
+	mnl_attr_put_strz(nlh, TBDEVICE_A_IFNAME, interface);
 	if (mnlg_socket_send(nlg, nlh) < 0) {
 		ret = -errno;
 		goto out;
@@ -924,7 +878,7 @@ out:
 	if (nlg)
 		mnlg_socket_close(nlg);
 	if (ret) {
-		free_wgdevice(*device);
+		free_tbdevice(*device);
 		if (ret == -EINTR)
 			goto try_again;
 		*device = NULL;
@@ -946,11 +900,11 @@ char *ipc_list_devices(void)
 		goto cleanup;
 
 #ifdef __linux__
-	ret = kernel_get_wireguard_interfaces(&buffer);
+	ret = kernel_get_tunnelbridge_interfaces(&buffer);
 	if (ret < 0)
 		goto cleanup;
 #endif
-	ret = userspace_get_wireguard_interfaces(&buffer);
+	ret = userspace_get_tunnelbridge_interfaces(&buffer);
 	if (ret < 0)
 		goto cleanup;
 
@@ -963,10 +917,10 @@ cleanup:
 	return buffer.buffer;
 }
 
-int ipc_get_device(struct wgdevice **dev, const char *interface)
+int ipc_get_device(struct tbdevice **dev, const char *interface)
 {
 #ifdef __linux__
-	if (userspace_has_wireguard_interface(interface))
+	if (userspace_has_tunnelbridge_interface(interface))
 		return userspace_get_device(dev, interface);
 	return kernel_get_device(dev, interface);
 #else
@@ -974,10 +928,10 @@ int ipc_get_device(struct wgdevice **dev, const char *interface)
 #endif
 }
 
-int ipc_set_device(struct wgdevice *dev)
+int ipc_set_device(struct tbdevice *dev)
 {
 #ifdef __linux__
-	if (userspace_has_wireguard_interface(dev->name))
+	if (userspace_has_tunnelbridge_interface(dev->name))
 		return userspace_set_device(dev);
 	return kernel_set_device(dev);
 #else

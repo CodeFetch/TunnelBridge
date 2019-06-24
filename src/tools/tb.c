@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -17,10 +18,10 @@ static const struct {
 	const char *description;
 } subcommands[] = {
 	{ "show", show_main, "Shows the current configuration and device information" },
-	{ "showconf", showconf_main, "Shows the current configuration of a given WireGuard interface, for use with `setconf'" },
+	{ "showconf", showconf_main, "Shows the current configuration of a given TunnelBridge interface, for use with `setconf'" },
 	{ "set", set_main, "Change the current configuration, add peers, remove peers, or change peers" },
-	{ "setconf", setconf_main, "Applies a configuration file to a WireGuard interface" },
-	{ "addconf", setconf_main, "Appends a configuration file to a WireGuard interface" },
+	{ "setconf", setconf_main, "Applies a configuration file to a TunnelBridge interface" },
+	{ "addconf", setconf_main, "Appends a configuration file to a TunnelBridge interface" },
 	{ "genkey", genkey_main, "Generates a new private key and writes it to stdout" },
 	{ "genpsk", genkey_main, "Generates a new preshared key and writes it to stdout" },
 	{ "pubkey", pubkey_main, "Reads a private key from stdin and writes a public key to stdout" }

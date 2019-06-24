@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -17,14 +18,14 @@
 #include <net/udp_tunnel.h>
 #include <net/ipv6.h>
 
-static int send4(struct wg_device *wg, struct sk_buff *skb,
+static int send4(struct tb_device *tb, struct sk_buff *skb,
 		 struct endpoint *endpoint, u8 ds, struct dst_cache *cache)
 {
 	struct flowi4 fl = {
 		.saddr = endpoint->src4.s_addr,
 		.daddr = endpoint->addr4.sin_addr.s_addr,
 		.fl4_dport = endpoint->addr4.sin_port,
-		.flowi4_mark = wg->fwmark,
+		.flowi4_mark = tb->fwmark,
 		.flowi4_proto = IPPROTO_UDP
 	};
 	struct rtable *rt = NULL;
@@ -32,11 +33,11 @@ static int send4(struct wg_device *wg, struct sk_buff *skb,
 	int ret = 0;
 
 	skb->next = skb->prev = NULL;
-	skb->dev = wg->dev;
-	skb->mark = wg->fwmark;
+	skb->dev = tb->dev;
+	skb->mark = tb->fwmark;
 
 	rcu_read_lock_bh();
-	sock = rcu_dereference_bh(wg->sock4);
+	sock = rcu_dereference_bh(tb->sock4);
 
 	if (unlikely(!sock)) {
 		ret = -ENONET;
@@ -74,13 +75,13 @@ static int send4(struct wg_device *wg, struct sk_buff *skb,
 		if (unlikely(IS_ERR(rt))) {
 			ret = PTR_ERR(rt);
 			net_dbg_ratelimited("%s: No route to %pISpfsc, error %d\n",
-					    wg->dev->name, &endpoint->addr, ret);
+					    tb->dev->name, &endpoint->addr, ret);
 			goto err;
 		} else if (unlikely(rt->dst.dev == skb->dev)) {
 			ip_rt_put(rt);
 			ret = -ELOOP;
 			net_dbg_ratelimited("%s: Avoiding routing loop to %pISpfsc\n",
-					    wg->dev->name, &endpoint->addr);
+					    tb->dev->name, &endpoint->addr);
 			goto err;
 		}
 		if (cache)
@@ -100,7 +101,7 @@ out:
 	return ret;
 }
 
-static int send6(struct wg_device *wg, struct sk_buff *skb,
+static int send6(struct tb_device *tb, struct sk_buff *skb,
 		 struct endpoint *endpoint, u8 ds, struct dst_cache *cache)
 {
 #if IS_ENABLED(CONFIG_IPV6)
@@ -108,7 +109,7 @@ static int send6(struct wg_device *wg, struct sk_buff *skb,
 		.saddr = endpoint->src6,
 		.daddr = endpoint->addr6.sin6_addr,
 		.fl6_dport = endpoint->addr6.sin6_port,
-		.flowi6_mark = wg->fwmark,
+		.flowi6_mark = tb->fwmark,
 		.flowi6_oif = endpoint->addr6.sin6_scope_id,
 		.flowi6_proto = IPPROTO_UDP
 		/* TODO: addr->sin6_flowinfo */
@@ -118,11 +119,11 @@ static int send6(struct wg_device *wg, struct sk_buff *skb,
 	int ret = 0;
 
 	skb->next = skb->prev = NULL;
-	skb->dev = wg->dev;
-	skb->mark = wg->fwmark;
+	skb->dev = tb->dev;
+	skb->mark = tb->fwmark;
 
 	rcu_read_lock_bh();
-	sock = rcu_dereference_bh(wg->sock6);
+	sock = rcu_dereference_bh(tb->sock6);
 
 	if (unlikely(!sock)) {
 		ret = -ENONET;
@@ -146,13 +147,13 @@ static int send6(struct wg_device *wg, struct sk_buff *skb,
 						 &fl);
 		if (unlikely(ret)) {
 			net_dbg_ratelimited("%s: No route to %pISpfsc, error %d\n",
-					    wg->dev->name, &endpoint->addr, ret);
+					    tb->dev->name, &endpoint->addr, ret);
 			goto err;
 		} else if (unlikely(dst->dev == skb->dev)) {
 			dst_release(dst);
 			ret = -ELOOP;
 			net_dbg_ratelimited("%s: Avoiding routing loop to %pISpfsc\n",
-					    wg->dev->name, &endpoint->addr);
+					    tb->dev->name, &endpoint->addr);
 			goto err;
 		}
 		if (cache)
@@ -175,7 +176,7 @@ out:
 #endif
 }
 
-int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
+int tb_socket_send_skb_to_peer(struct tb_peer *peer, struct sk_buff *skb, u8 ds)
 {
 	size_t skb_len = skb->len;
 	int ret = -EAFNOSUPPORT;
@@ -196,7 +197,7 @@ int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
 	return ret;
 }
 
-int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
+int tb_socket_send_buffer_to_peer(struct tb_peer *peer, void *buffer,
 				  size_t len, u8 ds)
 {
 	struct sk_buff *skb = alloc_skb(len + SKB_HEADER_LEN, GFP_ATOMIC);
@@ -207,10 +208,10 @@ int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
 	skb_reserve(skb, SKB_HEADER_LEN);
 	skb_set_inner_network_header(skb, 0);
 	skb_put_data(skb, buffer, len);
-	return wg_socket_send_skb_to_peer(peer, skb, ds);
+	return tb_socket_send_skb_to_peer(peer, skb, ds);
 }
 
-int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
+int tb_socket_send_buffer_as_reply_to_skb(struct tb_device *tb,
 					  struct sk_buff *in_skb, void *buffer,
 					  size_t len)
 {
@@ -220,7 +221,7 @@ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
 
 	if (unlikely(!in_skb))
 		return -EINVAL;
-	ret = wg_socket_endpoint_from_skb(&endpoint, in_skb);
+	ret = tb_socket_endpoint_from_skb(&endpoint, in_skb);
 	if (unlikely(ret < 0))
 		return ret;
 
@@ -232,9 +233,9 @@ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
 	skb_put_data(skb, buffer, len);
 
 	if (endpoint.addr.sa_family == AF_INET)
-		ret = send4(wg, skb, &endpoint, 0, NULL);
+		ret = send4(tb, skb, &endpoint, 0, NULL);
 	else if (endpoint.addr.sa_family == AF_INET6)
-		ret = send6(wg, skb, &endpoint, 0, NULL);
+		ret = send6(tb, skb, &endpoint, 0, NULL);
 	/* No other possibilities if the endpoint is valid, which it is,
 	 * as we checked above.
 	 */
@@ -242,7 +243,7 @@ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
 	return ret;
 }
 
-int wg_socket_endpoint_from_skb(struct endpoint *endpoint,
+int tb_socket_endpoint_from_skb(struct endpoint *endpoint,
 				const struct sk_buff *skb)
 {
 	memset(endpoint, 0, sizeof(*endpoint));
@@ -280,7 +281,7 @@ static bool endpoint_eq(const struct endpoint *a, const struct endpoint *b)
 	       unlikely(!a->addr.sa_family && !b->addr.sa_family);
 }
 
-void wg_socket_set_peer_endpoint(struct wg_peer *peer,
+void tb_socket_set_peer_endpoint(struct tb_peer *peer,
 				 const struct endpoint *endpoint)
 {
 	/* First we check unlocked, in order to optimize, since it's pretty rare
@@ -306,16 +307,16 @@ out:
 	write_unlock_bh(&peer->endpoint_lock);
 }
 
-void wg_socket_set_peer_endpoint_from_skb(struct wg_peer *peer,
+void tb_socket_set_peer_endpoint_from_skb(struct tb_peer *peer,
 					  const struct sk_buff *skb)
 {
 	struct endpoint endpoint;
 
-	if (!wg_socket_endpoint_from_skb(&endpoint, skb))
-		wg_socket_set_peer_endpoint(peer, &endpoint);
+	if (!tb_socket_endpoint_from_skb(&endpoint, skb))
+		tb_socket_set_peer_endpoint(peer, &endpoint);
 }
 
-void wg_socket_clear_peer_endpoint_src(struct wg_peer *peer)
+void tb_socket_clear_peer_endpoint_src(struct tb_peer *peer)
 {
 	write_lock_bh(&peer->endpoint_lock);
 	memset(&peer->endpoint.src6, 0, sizeof(peer->endpoint.src6));
@@ -323,16 +324,16 @@ void wg_socket_clear_peer_endpoint_src(struct wg_peer *peer)
 	write_unlock_bh(&peer->endpoint_lock);
 }
 
-static int wg_receive(struct sock *sk, struct sk_buff *skb)
+static int tb_receive(struct sock *sk, struct sk_buff *skb)
 {
-	struct wg_device *wg;
+	struct tb_device *tb;
 
 	if (unlikely(!sk))
 		goto err;
-	wg = sk->sk_user_data;
-	if (unlikely(!wg))
+	tb = sk->sk_user_data;
+	if (unlikely(!tb))
 		goto err;
-	wg_packet_receive(wg, skb);
+	tb_packet_receive(tb, skb);
 	return 0;
 
 err:
@@ -355,13 +356,13 @@ static void set_sock_opts(struct socket *sock)
 	sk_set_memalloc(sock->sk);
 }
 
-int wg_socket_init(struct wg_device *wg, u16 port)
+int tb_socket_init(struct tb_device *tb, u16 port)
 {
 	int ret;
 	struct udp_tunnel_sock_cfg cfg = {
-		.sk_user_data = wg,
+		.sk_user_data = tb,
 		.encap_type = 1,
-		.encap_rcv = wg_receive
+		.encap_rcv = tb_receive
 	};
 	struct socket *new4 = NULL, *new6 = NULL;
 	struct udp_port_cfg port4 = {
@@ -385,50 +386,50 @@ int wg_socket_init(struct wg_device *wg, u16 port)
 retry:
 #endif
 
-	ret = udp_sock_create(wg->creating_net, &port4, &new4);
+	ret = udp_sock_create(tb->creating_net, &port4, &new4);
 	if (ret < 0) {
-		pr_err("%s: Could not create IPv4 socket\n", wg->dev->name);
+		pr_err("%s: Could not create IPv4 socket\n", tb->dev->name);
 		return ret;
 	}
 	set_sock_opts(new4);
-	setup_udp_tunnel_sock(wg->creating_net, new4, &cfg);
+	setup_udp_tunnel_sock(tb->creating_net, new4, &cfg);
 
 #if IS_ENABLED(CONFIG_IPV6)
 	if (ipv6_mod_enabled()) {
 		port6.local_udp_port = inet_sk(new4->sk)->inet_sport;
-		ret = udp_sock_create(wg->creating_net, &port6, &new6);
+		ret = udp_sock_create(tb->creating_net, &port6, &new6);
 		if (ret < 0) {
 			udp_tunnel_sock_release(new4);
 			if (ret == -EADDRINUSE && !port && retries++ < 100)
 				goto retry;
 			pr_err("%s: Could not create IPv6 socket\n",
-			       wg->dev->name);
+			       tb->dev->name);
 			return ret;
 		}
 		set_sock_opts(new6);
-		setup_udp_tunnel_sock(wg->creating_net, new6, &cfg);
+		setup_udp_tunnel_sock(tb->creating_net, new6, &cfg);
 	}
 #endif
 
-	wg_socket_reinit(wg, new4 ? new4->sk : NULL, new6 ? new6->sk : NULL);
+	tb_socket_reinit(tb, new4 ? new4->sk : NULL, new6 ? new6->sk : NULL);
 	return 0;
 }
 
-void wg_socket_reinit(struct wg_device *wg, struct sock *new4,
+void tb_socket_reinit(struct tb_device *tb, struct sock *new4,
 		      struct sock *new6)
 {
 	struct sock *old4, *old6;
 
-	mutex_lock(&wg->socket_update_lock);
-	old4 = rcu_dereference_protected(wg->sock4,
-				lockdep_is_held(&wg->socket_update_lock));
-	old6 = rcu_dereference_protected(wg->sock6,
-				lockdep_is_held(&wg->socket_update_lock));
-	rcu_assign_pointer(wg->sock4, new4);
-	rcu_assign_pointer(wg->sock6, new6);
+	mutex_lock(&tb->socket_update_lock);
+	old4 = rcu_dereference_protected(tb->sock4,
+				lockdep_is_held(&tb->socket_update_lock));
+	old6 = rcu_dereference_protected(tb->sock6,
+				lockdep_is_held(&tb->socket_update_lock));
+	rcu_assign_pointer(tb->sock4, new4);
+	rcu_assign_pointer(tb->sock6, new6);
 	if (new4)
-		wg->incoming_port = ntohs(inet_sk(new4)->inet_sport);
-	mutex_unlock(&wg->socket_update_lock);
+		tb->incoming_port = ntohs(inet_sk(new4)->inet_sport);
+	mutex_unlock(&tb->socket_update_lock);
 	synchronize_rcu();
 	synchronize_net();
 	sock_free(old4);

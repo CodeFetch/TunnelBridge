@@ -1,5 +1,5 @@
-#ifndef _WG_NET_DST_CACHE_H
-#define _WG_NET_DST_CACHE_H
+#ifndef _TB_NET_DST_CACHE_H
+#define _TB_NET_DST_CACHE_H
 
 #include <linux/jiffies.h>
 #include <net/dst.h>
@@ -94,4 +94,4 @@ int dst_cache_init(struct dst_cache *dst_cache, gfp_t gfp);
  */
 void dst_cache_destroy(struct dst_cache *dst_cache);
 
-#endif /* _WG_NET_DST_CACHE_H */
+#endif /* _TB_NET_DST_CACHE_H */

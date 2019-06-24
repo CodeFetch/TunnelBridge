@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
+# Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
 # Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
 
 PKG_CONFIG ?= pkg-config
@@ -13,7 +14,7 @@ BASHCOMPDIR ?= $(PREFIX)/share/bash-completion/completions
 SYSTEMDUNITDIR ?= $(shell $(PKG_CONFIG) --variable=systemdsystemunitdir systemd 2>/dev/null || echo "$(PREFIX)/lib/systemd/system")
 RUNSTATEDIR ?= /var/run
 WITH_BASHCOMPLETION ?=
-WITH_WGQUICK ?=
+WITH_TBQUICK ?=
 WITH_SYSTEMDUNITS ?=
 
 ifeq ($(WITH_BASHCOMPLETION),)
@@ -21,12 +22,12 @@ ifneq ($(strip $(wildcard $(BASHCOMPDIR))),)
 WITH_BASHCOMPLETION := yes
 endif
 endif
-ifeq ($(WITH_WGQUICK),)
+ifeq ($(WITH_TBQUICK),)
 ifneq ($(strip $(wildcard $(BINDIR)/bash)),)
-WITH_WGQUICK := yes
+WITH_TBQUICK := yes
 endif
 ifneq ($(strip $(wildcard $(DESTDIR)/bin/bash)),)
-WITH_WGQUICK := yes
+WITH_TBQUICK := yes
 endif
 endif
 ifeq ($(WITH_SYSTEMDUNITS),)
@@ -58,7 +59,7 @@ ifeq ($(PLATFORM),windows)
 CC := x86_64-w64-mingw32-gcc
 CFLAGS += -Iwincompat/include -include wincompat/compat.h
 LDLIBS += -lws2_32
-wg: wincompat/libc.o wincompat/init.o
+tb: wincompat/libc.o wincompat/init.o
 endif
 
 ifneq ($(V),1)
@@ -70,30 +71,30 @@ COMPILE.c = @echo "  CC      $$(pwd)/$@";
 COMPILE.c += $(BUILT_IN_COMPILE.c)
 endif
 
-wg: $(patsubst %.c,%.o,$(wildcard *.c))
+tb: $(patsubst %.c,%.o,$(wildcard *.c))
 
 ifneq ($(V),1)
 clean:
-	@echo "  CLEAN   $$(pwd)/{wg,*.o,*.d}"
-	@$(RM) wg *.o *.d
+	@echo "  CLEAN   $$(pwd)/{tb,*.o,*.d}"
+	@$(RM) tb *.o *.d
 else
 clean:
-	$(RM) wg *.o *.d
+	$(RM) tb *.o *.d
 endif
 
-install: wg
-	@install -v -d "$(DESTDIR)$(BINDIR)" && install -v -m 0755 wg "$(DESTDIR)$(BINDIR)/wg"
-	@install -v -d "$(DESTDIR)$(MANDIR)/man8" && install -v -m 0644 man/wg.8 "$(DESTDIR)$(MANDIR)/man8/wg.8"
+install: tb
+	@install -v -d "$(DESTDIR)$(BINDIR)" && install -v -m 0755 tb "$(DESTDIR)$(BINDIR)/tb"
+	@install -v -d "$(DESTDIR)$(MANDIR)/man8" && install -v -m 0644 man/tb.8 "$(DESTDIR)$(MANDIR)/man8/tb.8"
 	@[ "$(WITH_BASHCOMPLETION)" = "yes" ] || exit 0; \
-	install -v -d "$(DESTDIR)$(BASHCOMPDIR)" && install -v -m 0644 completion/wg.bash-completion "$(DESTDIR)$(BASHCOMPDIR)/wg"
-	@[ "$(WITH_WGQUICK)" = "yes" ] || exit 0; \
-	install -v -m 0755 wg-quick/$(PLATFORM).bash "$(DESTDIR)$(BINDIR)/wg-quick" && install -v -m 0700 -d "$(DESTDIR)$(SYSCONFDIR)/wireguard"
-	@[ "$(WITH_WGQUICK)" = "yes" ] || exit 0; \
-	install -v -m 0644 man/wg-quick.8 "$(DESTDIR)$(MANDIR)/man8/wg-quick.8"
-	@[ "$(WITH_WGQUICK)" = "yes" -a "$(WITH_BASHCOMPLETION)" = "yes" ] || exit 0; \
-	install -v -m 0644 completion/wg-quick.bash-completion "$(DESTDIR)$(BASHCOMPDIR)/wg-quick"
-	@[ "$(WITH_WGQUICK)" = "yes" -a "$(WITH_SYSTEMDUNITS)" = "yes" ] || exit 0; \
-	install -v -d "$(DESTDIR)$(SYSTEMDUNITDIR)" && install -v -m 0644 systemd/wg-quick@.service "$(DESTDIR)$(SYSTEMDUNITDIR)/wg-quick@.service"
+	install -v -d "$(DESTDIR)$(BASHCOMPDIR)" && install -v -m 0644 completion/tb.bash-completion "$(DESTDIR)$(BASHCOMPDIR)/tb"
+	@[ "$(WITH_TBQUICK)" = "yes" ] || exit 0; \
+	install -v -m 0755 tb-quick/$(PLATFORM).bash "$(DESTDIR)$(BINDIR)/tb-quick" && install -v -m 0700 -d "$(DESTDIR)$(SYSCONFDIR)/tunnelbridge"
+	@[ "$(WITH_TBQUICK)" = "yes" ] || exit 0; \
+	install -v -m 0644 man/tb-quick.8 "$(DESTDIR)$(MANDIR)/man8/tb-quick.8"
+	@[ "$(WITH_TBQUICK)" = "yes" -a "$(WITH_BASHCOMPLETION)" = "yes" ] || exit 0; \
+	install -v -m 0644 completion/tb-quick.bash-completion "$(DESTDIR)$(BASHCOMPDIR)/tb-quick"
+	@[ "$(WITH_TBQUICK)" = "yes" -a "$(WITH_SYSTEMDUNITS)" = "yes" ] || exit 0; \
+	install -v -d "$(DESTDIR)$(SYSTEMDUNITDIR)" && install -v -m 0644 systemd/tb-quick@.service "$(DESTDIR)$(SYSTEMDUNITDIR)/tb-quick@.service"
 
 help:
 	@cat INSTALL

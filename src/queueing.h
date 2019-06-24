@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#ifndef _WG_QUEUEING_H
-#define _WG_QUEUEING_H
+#ifndef _TB_QUEUEING_H
+#define _TB_QUEUEING_H
 
 #include "peer.h"
 #include <linux/types.h>
@@ -12,41 +13,41 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 
-struct wg_device;
-struct wg_peer;
+struct tb_device;
+struct tb_peer;
 struct multicore_worker;
 struct crypt_queue;
 struct sk_buff;
 
 /* queueing.c APIs: */
-int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
+int tb_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 			 bool multicore, unsigned int len);
-void wg_packet_queue_free(struct crypt_queue *queue, bool multicore);
+void tb_packet_queue_free(struct crypt_queue *queue, bool multicore);
 struct multicore_worker __percpu *
-wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr);
+tb_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr);
 
 /* receive.c APIs: */
-void wg_packet_receive(struct wg_device *wg, struct sk_buff *skb);
-void wg_packet_handshake_receive_worker(struct work_struct *work);
+void tb_packet_receive(struct tb_device *tb, struct sk_buff *skb);
+void tb_packet_handshake_receive_worker(struct work_struct *work);
 /* NAPI poll function: */
-int wg_packet_rx_poll(struct napi_struct *napi, int budget);
+int tb_packet_rx_poll(struct napi_struct *napi, int budget);
 /* Workqueue worker: */
-void wg_packet_decrypt_worker(struct work_struct *work);
+void tb_packet_decrypt_worker(struct work_struct *work);
 
 /* send.c APIs: */
-void wg_packet_send_queued_handshake_initiation(struct wg_peer *peer,
+void tb_packet_send_queued_handshake_initiation(struct tb_peer *peer,
 						bool is_retry);
-void wg_packet_send_handshake_response(struct wg_peer *peer);
-void wg_packet_send_handshake_cookie(struct wg_device *wg,
+void tb_packet_send_handshake_response(struct tb_peer *peer);
+void tb_packet_send_handshake_cookie(struct tb_device *tb,
 				     struct sk_buff *initiating_skb,
 				     __le32 sender_index);
-void wg_packet_send_keepalive(struct wg_peer *peer);
-void wg_packet_purge_staged_packets(struct wg_peer *peer);
-void wg_packet_send_staged_packets(struct wg_peer *peer);
+void tb_packet_send_keepalive(struct tb_peer *peer);
+void tb_packet_purge_staged_packets(struct tb_peer *peer);
+void tb_packet_send_staged_packets(struct tb_peer *peer);
 /* Workqueue workers: */
-void wg_packet_handshake_send_worker(struct work_struct *work);
-void wg_packet_tx_worker(struct work_struct *work);
-void wg_packet_encrypt_worker(struct work_struct *work);
+void tb_packet_handshake_send_worker(struct work_struct *work);
+void tb_packet_tx_worker(struct work_struct *work);
+void tb_packet_encrypt_worker(struct work_struct *work);
 
 enum packet_state {
 	PACKET_STATE_UNCRYPTED,
@@ -66,7 +67,7 @@ struct packet_cb {
 #define PACKET_PEER(skb) (PACKET_CB(skb)->keypair->entry.peer)
 
 /* Returns either the correct skb->protocol value, or 0 if invalid. */
-static inline __be16 wg_skb_examine_untrusted_ip_hdr(struct sk_buff *skb)
+static inline __be16 tb_skb_examine_untrusted_ip_hdr(struct sk_buff *skb)
 {
 	if (skb_network_header(skb) >= skb->head &&
 	    (skb_network_header(skb) + sizeof(struct iphdr)) <=
@@ -81,7 +82,7 @@ static inline __be16 wg_skb_examine_untrusted_ip_hdr(struct sk_buff *skb)
 	return 0;
 }
 
-static inline void wg_reset_packet(struct sk_buff *skb)
+static inline void tb_reset_packet(struct sk_buff *skb)
 {
 	const int pfmemalloc = skb->pfmemalloc;
 
@@ -107,7 +108,7 @@ static inline void wg_reset_packet(struct sk_buff *skb)
 	skb_reset_inner_headers(skb);
 }
 
-static inline int wg_cpumask_choose_online(int *stored_cpu, unsigned int id)
+static inline int tb_cpumask_choose_online(int *stored_cpu, unsigned int id)
 {
 	unsigned int cpu = *stored_cpu, cpu_index, i;
 
@@ -129,7 +130,7 @@ static inline int wg_cpumask_choose_online(int *stored_cpu, unsigned int id)
  * a bit slower, and it doesn't seem like this potential race actually
  * introduces any performance loss, so we live with it.
  */
-static inline int wg_cpumask_next_online(int *next)
+static inline int tb_cpumask_next_online(int *next)
 {
 	int cpu = *next;
 
@@ -139,7 +140,7 @@ static inline int wg_cpumask_next_online(int *next)
 	return cpu;
 }
 
-static inline int wg_queue_enqueue_per_device_and_peer(
+static inline int tb_queue_enqueue_per_device_and_peer(
 	struct crypt_queue *device_queue, struct crypt_queue *peer_queue,
 	struct sk_buff *skb, struct workqueue_struct *wq, int *next_cpu)
 {
@@ -154,45 +155,45 @@ static inline int wg_queue_enqueue_per_device_and_peer(
 	/* Then we queue it up in the device queue, which consumes the
 	 * packet as soon as it can.
 	 */
-	cpu = wg_cpumask_next_online(next_cpu);
+	cpu = tb_cpumask_next_online(next_cpu);
 	if (unlikely(ptr_ring_produce_bh(&device_queue->ring, skb)))
 		return -EPIPE;
 	queue_work_on(cpu, wq, &per_cpu_ptr(device_queue->worker, cpu)->work);
 	return 0;
 }
 
-static inline void wg_queue_enqueue_per_peer(struct crypt_queue *queue,
+static inline void tb_queue_enqueue_per_peer(struct crypt_queue *queue,
 					     struct sk_buff *skb,
 					     enum packet_state state)
 {
 	/* We take a reference, because as soon as we call atomic_set, the
 	 * peer can be freed from below us.
 	 */
-	struct wg_peer *peer = wg_peer_get(PACKET_PEER(skb));
+	struct tb_peer *peer = tb_peer_get(PACKET_PEER(skb));
 
 	atomic_set_release(&PACKET_CB(skb)->state, state);
-	queue_work_on(wg_cpumask_choose_online(&peer->serial_work_cpu,
+	queue_work_on(tb_cpumask_choose_online(&peer->serial_work_cpu,
 					       peer->internal_id),
 		      peer->device->packet_crypt_wq, &queue->work);
-	wg_peer_put(peer);
+	tb_peer_put(peer);
 }
 
-static inline void wg_queue_enqueue_per_peer_napi(struct crypt_queue *queue,
+static inline void tb_queue_enqueue_per_peer_napi(struct crypt_queue *queue,
 						  struct sk_buff *skb,
 						  enum packet_state state)
 {
 	/* We take a reference, because as soon as we call atomic_set, the
 	 * peer can be freed from below us.
 	 */
-	struct wg_peer *peer = wg_peer_get(PACKET_PEER(skb));
+	struct tb_peer *peer = tb_peer_get(PACKET_PEER(skb));
 
 	atomic_set_release(&PACKET_CB(skb)->state, state);
 	napi_schedule(&peer->napi);
-	wg_peer_put(peer);
+	tb_peer_put(peer);
 }
 
 #ifdef DEBUG
-bool wg_packet_counter_selftest(void);
+bool tb_packet_counter_selftest(void);
 #endif
 
-#endif /* _WG_QUEUEING_H */
+#endif /* _TB_QUEUEING_H */

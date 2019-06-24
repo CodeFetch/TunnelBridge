@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -70,8 +71,8 @@ static inline bool __attribute__((__warn_unused_result__)) get_random_bytes(uint
 
 int genkey_main(int argc, char *argv[])
 {
-	uint8_t key[WG_KEY_LEN];
-	char base64[WG_KEY_LEN_BASE64];
+	uint8_t key[TB_KEY_LEN];
+	char base64[TB_KEY_LEN_BASE64];
 	struct stat stat;
 
 	if (argc != 1) {
@@ -82,7 +83,7 @@ int genkey_main(int argc, char *argv[])
 	if (!fstat(STDOUT_FILENO, &stat) && S_ISREG(stat.st_mode) && stat.st_mode & S_IRWXO)
 		fputs("Warning: writing to world accessible file.\nConsider setting the umask to 077 and trying again.\n", stderr);
 
-	if (!get_random_bytes(key, WG_KEY_LEN)) {
+	if (!get_random_bytes(key, TB_KEY_LEN)) {
 		perror("getrandom");
 		return 1;
 	}

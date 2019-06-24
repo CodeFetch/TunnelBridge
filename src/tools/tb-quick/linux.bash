@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 #
+# Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
 # Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
 #
 
@@ -11,7 +12,7 @@ export LC_ALL=C
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 export PATH="${SELF%/*}:$PATH"
 
-WG_CONFIG=""
+TB_CONFIG=""
 INTERFACE=""
 ADDRESSES=( )
 MTU=""
@@ -39,7 +40,7 @@ die() {
 parse_options() {
 	local interface_section=0 line key value stripped
 	CONFIG_FILE="$1"
-	[[ $CONFIG_FILE =~ ^[a-zA-Z0-9_=+.-]{1,15}$ ]] && CONFIG_FILE="/etc/wireguard/$CONFIG_FILE.conf"
+	[[ $CONFIG_FILE =~ ^[a-zA-Z0-9_=+.-]{1,15}$ ]] && CONFIG_FILE="/etc/tunnelbridge/$CONFIG_FILE.conf"
 	[[ -e $CONFIG_FILE ]] || die "\`$CONFIG_FILE' does not exist"
 	[[ $CONFIG_FILE =~ (^|/)([a-zA-Z0-9_=+.-]{1,15})\.conf$ ]] || die "The config file must be a valid interface name, followed by .conf"
 	CONFIG_FILE="$(readlink -f "$CONFIG_FILE")"
@@ -65,7 +66,7 @@ parse_options() {
 			SaveConfig) read_bool SAVE_CONFIG "$value"; continue ;;
 			esac
 		fi
-		WG_CONFIG+="$line"$'\n'
+		TB_CONFIG+="$line"$'\n'
 	done < "$CONFIG_FILE"
 	shopt -u nocasematch
 }
@@ -84,18 +85,18 @@ auto_su() {
 
 add_if() {
 	local ret
-	if ! cmd ip link add "$INTERFACE" type wireguard; then
+	if ! cmd ip link add "$INTERFACE" type tunnelbridge; then
 		ret=$?
-		[[ -e /sys/module/wireguard ]] || ! command -v "${WG_QUICK_USERSPACE_IMPLEMENTATION:-wireguard-go}" >/dev/null && exit $ret
-		echo "[!] Missing WireGuard kernel module. Falling back to slow userspace implementation."
-		cmd "${WG_QUICK_USERSPACE_IMPLEMENTATION:-wireguard-go}" "$INTERFACE"
+		[[ -e /sys/module/tunnelbridge ]] && exit $ret
+		echo "[!] Missing TunnelBridge kernel module. Falling back to slow userspace implementation."
+		cmd "${TB_QUICK_USERSPACE_IMPLEMENTATION:-tunnelbridge-go}" "$INTERFACE"
 	fi
 }
 
 del_if() {
 	local table
 	[[ $HAVE_SET_DNS -eq 0 ]] || unset_dns
-	if [[ -z $TABLE || $TABLE == auto ]] && get_fwmark table && [[ $(wg show "$INTERFACE" allowed-ips) =~ /0(\ |$'\n'|$) ]]; then
+	if [[ -z $TABLE || $TABLE == auto ]] && get_fwmark table && [[ $(tb show "$INTERFACE" allowed-ips) =~ /0(\ |$'\n'|$) ]]; then
 		while [[ $(ip -4 rule show) == *"lookup $table"* ]]; do
 			cmd ip -4 rule delete table $table
 		done
@@ -128,7 +129,7 @@ set_mtu_up() {
 		[[ $endpoint =~ ^\[?([a-z0-9:.]+)\]?:[0-9]+$ ]] || continue
 		output="$(ip route get "${BASH_REMATCH[1]}" || true)"
 		[[ ( $output =~ mtu\ ([0-9]+) || ( $output =~ dev\ ([^ ]+) && $(ip link show dev "${BASH_REMATCH[1]}") =~ mtu\ ([0-9]+) ) ) && ${BASH_REMATCH[1]} -gt $mtu ]] && mtu="${BASH_REMATCH[1]}"
-	done < <(wg show "$INTERFACE" endpoints)
+	done < <(tb show "$INTERFACE" endpoints)
 	if [[ $mtu -eq 0 ]]; then
 		read -r output < <(ip route show default || true) || true
 		[[ ( $output =~ mtu\ ([0-9]+) || ( $output =~ dev\ ([^ ]+) && $(ip link show dev "${BASH_REMATCH[1]}") =~ mtu\ ([0-9]+) ) ) && ${BASH_REMATCH[1]} -gt $mtu ]] && mtu="${BASH_REMATCH[1]}"
@@ -172,23 +173,10 @@ add_route() {
 	fi
 }
 
-get_fwmark() {
-	local fwmark
-	fwmark="$(wg show "$INTERFACE" fwmark)" || return 1
-	[[ -n $fwmark && $fwmark != off ]] || return 1
-	printf -v "$1" "%d" "$fwmark"
-	return 0
-}
+# TODO: We'd like to put it in a bridge here
 
 add_default() {
 	local table proto key value
-	if ! get_fwmark table; then
-		table=51820
-		while [[ -n $(ip -4 route show table $table) || -n $(ip -6 route show table $table) ]]; do
-			((table++))
-		done
-		cmd wg set "$INTERFACE" fwmark $table
-	fi
 	proto=-4
 	[[ $1 == *:* ]] && proto=-6
 	cmd ip $proto route add "$1" dev "$INTERFACE" table $table
@@ -201,7 +189,7 @@ add_default() {
 }
 
 set_config() {
-	cmd wg setconf "$INTERFACE" <(echo "$WG_CONFIG")
+	cmd tb setconf "$INTERFACE" <(echo "$TB_CONFIG")
 }
 
 save_config() {
@@ -231,7 +219,7 @@ save_config() {
 	done
 	old_umask="$(umask)"
 	umask 077
-	current_config="$(cmd wg showconf "$INTERFACE")"
+	current_config="$(cmd tb showconf "$INTERFACE")"
 	trap 'rm -f "$CONFIG_FILE.tmp"; exit' INT TERM EXIT
 	echo "${current_config/\[Interface\]$'\n'/$new_config}" > "$CONFIG_FILE.tmp" || die "Could not write configuration file"
 	sync "$CONFIG_FILE.tmp"
@@ -255,8 +243,8 @@ cmd_usage() {
 
 	  CONFIG_FILE is a configuration file, whose filename is the interface name
 	  followed by \`.conf'. Otherwise, INTERFACE is an interface name, with
-	  configuration found at /etc/wireguard/INTERFACE.conf. It is to be readable
-	  by wg(8)'s \`setconf' sub-command, with the exception of the following additions
+	  configuration found at /etc/tunnelbridge/INTERFACE.conf. It is to be readable
+	  by tb(8)'s \`setconf' sub-command, with the exception of the following additions
 	  to the [Interface] section, which are handled by $PROGRAM:
 
 	  - Address: may be specified one or more times and contains one or more
@@ -272,7 +260,7 @@ cmd_usage() {
 	  - SaveConfig: if set to \`true', the configuration is saved from the current
 	    state of the interface upon shutdown.
 
-	See wg-quick(8) for more info and examples.
+	See tb-quick(8) for more info and examples.
 	_EOF
 }
 
@@ -288,7 +276,7 @@ cmd_up() {
 	done
 	set_mtu_up
 	set_dns
-	for i in $(while read -r _ i; do for i in $i; do [[ $i =~ ^[0-9a-z:.]+/[0-9]+$ ]] && echo "$i"; done; done < <(wg show "$INTERFACE" allowed-ips) | sort -nr -k 2 -t /); do
+	for i in $(while read -r _ i; do for i in $i; do [[ $i =~ ^[0-9a-z:.]+/[0-9]+$ ]] && echo "$i"; done; done < <(tb show "$INTERFACE" allowed-ips) | sort -nr -k 2 -t /); do
 		add_route "$i"
 	done
 	execute_hooks "${POST_UP[@]}"
@@ -296,7 +284,7 @@ cmd_up() {
 }
 
 cmd_down() {
-	[[ " $(wg show interfaces) " == *" $INTERFACE "* ]] || die "\`$INTERFACE' is not a WireGuard interface"
+	[[ " $(tb show interfaces) " == *" $INTERFACE "* ]] || die "\`$INTERFACE' is not a TunnelBridge interface"
 	execute_hooks "${PRE_DOWN[@]}"
 	[[ $SAVE_CONFIG -eq 0 ]] || save_config
 	del_if
@@ -305,12 +293,12 @@ cmd_down() {
 }
 
 cmd_save() {
-	[[ " $(wg show interfaces) " == *" $INTERFACE "* ]] || die "\`$INTERFACE' is not a WireGuard interface"
+	[[ " $(tb show interfaces) " == *" $INTERFACE "* ]] || die "\`$INTERFACE' is not a TunnelBridge interface"
 	save_config
 }
 
 cmd_strip() {
-	echo "$WG_CONFIG"
+	echo "$TB_CONFIG"
 }
 
 # ~~ function override insertion point ~~

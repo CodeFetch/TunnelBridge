@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -13,8 +14,8 @@
 
 int pubkey_main(int argc, char *argv[])
 {
-	uint8_t key[WG_KEY_LEN] __attribute__((aligned(sizeof(uintptr_t))));
-	char base64[WG_KEY_LEN_BASE64];
+	uint8_t key[TB_KEY_LEN] __attribute__((aligned(sizeof(uintptr_t))));
+	char base64[TB_KEY_LEN_BASE64];
 	int trailing_char;
 
 	if (argc != 1) {
@@ -27,7 +28,7 @@ int pubkey_main(int argc, char *argv[])
 		fprintf(stderr, "%s: Key is not the correct length or format\n", PROG_NAME);
 		return 1;
 	}
-	base64[WG_KEY_LEN_BASE64 - 1] = '\0';
+	base64[TB_KEY_LEN_BASE64 - 1] = '\0';
 
 	for (;;) {
 		trailing_char = getc(stdin);

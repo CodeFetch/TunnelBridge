@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -20,11 +21,11 @@
 
 int showconf_main(int argc, char *argv[])
 {
-	char base64[WG_KEY_LEN_BASE64];
+	char base64[TB_KEY_LEN_BASE64];
 	char ip[INET6_ADDRSTRLEN];
-	struct wgdevice *device = NULL;
-	struct wgpeer *peer;
-	struct wgallowedip *allowedip;
+	struct tbdevice *device = NULL;
+	struct tbpeer *peer;
+	struct tballowedip *allowedip;
 	int ret = 1;
 
 	if (argc != 2) {
@@ -42,21 +43,21 @@ int showconf_main(int argc, char *argv[])
 		printf("ListenPort = %u\n", device->listen_port);
 	if (device->fwmark)
 		printf("FwMark = 0x%x\n", device->fwmark);
-	if (device->flags & WGDEVICE_HAS_PRIVATE_KEY) {
+	if (device->flags & TBDEVICE_HAS_PRIVATE_KEY) {
 		key_to_base64(base64, device->private_key);
 		printf("PrivateKey = %s\n", base64);
 	}
 	printf("\n");
-	for_each_wgpeer(device, peer) {
+	for_each_tbpeer(device, peer) {
 		key_to_base64(base64, peer->public_key);
 		printf("[Peer]\nPublicKey = %s\n", base64);
-		if (peer->flags & WGPEER_HAS_PRESHARED_KEY) {
+		if (peer->flags & TBPEER_HAS_PRESHARED_KEY) {
 			key_to_base64(base64, peer->preshared_key);
 			printf("PresharedKey = %s\n", base64);
 		}
 		if (peer->first_allowedip)
 			printf("AllowedIPs = ");
-		for_each_wgallowedip(peer, allowedip) {
+		for_each_tballowedip(peer, allowedip) {
 			if (allowedip->family == AF_INET) {
 				if (!inet_ntop(AF_INET, &allowedip->ip4, ip, INET6_ADDRSTRLEN))
 					continue;
@@ -98,6 +99,6 @@ int showconf_main(int argc, char *argv[])
 	ret = 0;
 
 cleanup:
-	free_wgdevice(device);
+	free_tbdevice(device);
 	return ret;
 }

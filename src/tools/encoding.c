@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  *
  * This is a specialized constant-time base64/hex implementation that resists side-channel attacks.
@@ -21,15 +22,15 @@ static inline void encode_base64(char dest[static 4], const uint8_t src[static 3
 
 }
 
-void key_to_base64(char base64[static WG_KEY_LEN_BASE64], const uint8_t key[static WG_KEY_LEN])
+void key_to_base64(char base64[static TB_KEY_LEN_BASE64], const uint8_t key[static TB_KEY_LEN])
 {
 	unsigned int i;
 
-	for (i = 0; i < WG_KEY_LEN / 3; ++i)
+	for (i = 0; i < TB_KEY_LEN / 3; ++i)
 		encode_base64(&base64[i * 4], &key[i * 3]);
 	encode_base64(&base64[i * 4], (const uint8_t[]){ key[i * 3 + 0], key[i * 3 + 1], 0 });
-	base64[WG_KEY_LEN_BASE64 - 2] = '=';
-	base64[WG_KEY_LEN_BASE64 - 1] = '\0';
+	base64[TB_KEY_LEN_BASE64 - 2] = '=';
+	base64[TB_KEY_LEN_BASE64 - 1] = '\0';
 }
 
 static inline int decode_base64(const char src[static 4])
@@ -47,16 +48,16 @@ static inline int decode_base64(const char src[static 4])
 	return val;
 }
 
-bool key_from_base64(uint8_t key[static WG_KEY_LEN], const char *base64)
+bool key_from_base64(uint8_t key[static TB_KEY_LEN], const char *base64)
 {
 	unsigned int i;
 	volatile uint8_t ret = 0;
 	int val;
 
-	if (strlen(base64) != WG_KEY_LEN_BASE64 - 1 || base64[WG_KEY_LEN_BASE64 - 2] != '=')
+	if (strlen(base64) != TB_KEY_LEN_BASE64 - 1 || base64[TB_KEY_LEN_BASE64 - 2] != '=')
 		return false;
 
-	for (i = 0; i < WG_KEY_LEN / 3; ++i) {
+	for (i = 0; i < TB_KEY_LEN / 3; ++i) {
 		val = decode_base64(&base64[i * 4]);
 		ret |= (uint32_t)val >> 31;
 		key[i * 3 + 0] = (val >> 16) & 0xff;
@@ -71,26 +72,26 @@ bool key_from_base64(uint8_t key[static WG_KEY_LEN], const char *base64)
 	return 1 & ((ret - 1) >> 8);
 }
 
-void key_to_hex(char hex[static WG_KEY_LEN_HEX], const uint8_t key[static WG_KEY_LEN])
+void key_to_hex(char hex[static TB_KEY_LEN_HEX], const uint8_t key[static TB_KEY_LEN])
 {
 	unsigned int i;
 
-	for (i = 0; i < WG_KEY_LEN; ++i) {
+	for (i = 0; i < TB_KEY_LEN; ++i) {
 		hex[i * 2] = 87U + (key[i] >> 4) + ((((key[i] >> 4) - 10U) >> 8) & ~38U);
 		hex[i * 2 + 1] = 87U + (key[i] & 0xf) + ((((key[i] & 0xf) - 10U) >> 8) & ~38U);
 	}
 	hex[i * 2] = '\0';
 }
 
-bool key_from_hex(uint8_t key[static WG_KEY_LEN], const char *hex)
+bool key_from_hex(uint8_t key[static TB_KEY_LEN], const char *hex)
 {
 	uint8_t c, c_acc, c_alpha0, c_alpha, c_num0, c_num, c_val;
 	volatile uint8_t ret = 0;
 
-	if (strlen(hex) != WG_KEY_LEN_HEX - 1)
+	if (strlen(hex) != TB_KEY_LEN_HEX - 1)
 		return false;
 
-	for (unsigned int i = 0; i < WG_KEY_LEN_HEX - 1; i += 2) {
+	for (unsigned int i = 0; i < TB_KEY_LEN_HEX - 1; i += 2) {
 		c = (uint8_t)hex[i];
 		c_num = c ^ 48U;
 		c_num0 = (c_num - 10U) >> 8;
@@ -113,11 +114,11 @@ bool key_from_hex(uint8_t key[static WG_KEY_LEN], const char *hex)
 	return 1 & ((ret - 1) >> 8);
 }
 
-bool key_is_zero(const uint8_t key[static WG_KEY_LEN])
+bool key_is_zero(const uint8_t key[static TB_KEY_LEN])
 {
 	volatile uint8_t acc = 0;
 
-	for (unsigned int i = 0; i < WG_KEY_LEN; ++i) {
+	for (unsigned int i = 0; i < TB_KEY_LEN; ++i) {
 		acc |= key[i];
 		asm volatile("" : "=r"(acc) : "0"(acc));
 	}

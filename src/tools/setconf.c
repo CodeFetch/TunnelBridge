@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -15,7 +16,7 @@
 
 int setconf_main(int argc, char *argv[])
 {
-	struct wgdevice *device = NULL;
+	struct tbdevice *device = NULL;
 	struct config_ctx ctx;
 	FILE *config_input = NULL;
 	char *config_buffer = NULL;
@@ -61,6 +62,6 @@ cleanup:
 	if (config_input)
 		fclose(config_input);
 	free(config_buffer);
-	free_wgdevice(device);
+	free_tbdevice(device);
 	return ret;
 }

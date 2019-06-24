@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -19,7 +20,7 @@ static struct hlist_head *pubkey_bucket(struct pubkey_hashtable *table,
 	return &table->hashtable[hash & (HASH_SIZE(table->hashtable) - 1)];
 }
 
-struct pubkey_hashtable *wg_pubkey_hashtable_alloc(void)
+struct pubkey_hashtable *tb_pubkey_hashtable_alloc(void)
 {
 	struct pubkey_hashtable *table = kvmalloc(sizeof(*table), GFP_KERNEL);
 
@@ -32,8 +33,8 @@ struct pubkey_hashtable *wg_pubkey_hashtable_alloc(void)
 	return table;
 }
 
-void wg_pubkey_hashtable_add(struct pubkey_hashtable *table,
-			     struct wg_peer *peer)
+void tb_pubkey_hashtable_add(struct pubkey_hashtable *table,
+			     struct tb_peer *peer)
 {
 	mutex_lock(&table->lock);
 	hlist_add_head_rcu(&peer->pubkey_hash,
@@ -41,8 +42,8 @@ void wg_pubkey_hashtable_add(struct pubkey_hashtable *table,
 	mutex_unlock(&table->lock);
 }
 
-void wg_pubkey_hashtable_remove(struct pubkey_hashtable *table,
-				struct wg_peer *peer)
+void tb_pubkey_hashtable_remove(struct pubkey_hashtable *table,
+				struct tb_peer *peer)
 {
 	mutex_lock(&table->lock);
 	hlist_del_init_rcu(&peer->pubkey_hash);
@@ -50,11 +51,11 @@ void wg_pubkey_hashtable_remove(struct pubkey_hashtable *table,
 }
 
 /* Returns a strong reference to a peer */
-struct wg_peer *
-wg_pubkey_hashtable_lookup(struct pubkey_hashtable *table,
+struct tb_peer *
+tb_pubkey_hashtable_lookup(struct pubkey_hashtable *table,
 			   const u8 pubkey[NOISE_PUBLIC_KEY_LEN])
 {
-	struct wg_peer *iter_peer, *peer = NULL;
+	struct tb_peer *iter_peer, *peer = NULL;
 
 	rcu_read_lock_bh();
 	hlist_for_each_entry_rcu_bh(iter_peer, pubkey_bucket(table, pubkey),
@@ -65,7 +66,7 @@ wg_pubkey_hashtable_lookup(struct pubkey_hashtable *table,
 			break;
 		}
 	}
-	peer = wg_peer_get_maybe_zero(peer);
+	peer = tb_peer_get_maybe_zero(peer);
 	rcu_read_unlock_bh();
 	return peer;
 }
@@ -80,7 +81,7 @@ static struct hlist_head *index_bucket(struct index_hashtable *table,
 				 (HASH_SIZE(table->hashtable) - 1)];
 }
 
-struct index_hashtable *wg_index_hashtable_alloc(void)
+struct index_hashtable *tb_index_hashtable_alloc(void)
 {
 	struct index_hashtable *table = kvmalloc(sizeof(*table), GFP_KERNEL);
 
@@ -116,7 +117,7 @@ struct index_hashtable *wg_index_hashtable_alloc(void)
  * is another thing to consider moving forward.
  */
 
-__le32 wg_index_hashtable_insert(struct index_hashtable *table,
+__le32 tb_index_hashtable_insert(struct index_hashtable *table,
 				 struct index_hashtable_entry *entry)
 {
 	struct index_hashtable_entry *existing_entry;
@@ -163,7 +164,7 @@ search_unused_slot:
 	return entry->index;
 }
 
-bool wg_index_hashtable_replace(struct index_hashtable *table,
+bool tb_index_hashtable_replace(struct index_hashtable *table,
 				struct index_hashtable_entry *old,
 				struct index_hashtable_entry *new)
 {
@@ -184,7 +185,7 @@ bool wg_index_hashtable_replace(struct index_hashtable *table,
 	return true;
 }
 
-void wg_index_hashtable_remove(struct index_hashtable *table,
+void tb_index_hashtable_remove(struct index_hashtable *table,
 			       struct index_hashtable_entry *entry)
 {
 	spin_lock_bh(&table->lock);
@@ -194,9 +195,9 @@ void wg_index_hashtable_remove(struct index_hashtable *table,
 
 /* Returns a strong reference to a entry->peer */
 struct index_hashtable_entry *
-wg_index_hashtable_lookup(struct index_hashtable *table,
+tb_index_hashtable_lookup(struct index_hashtable *table,
 			  const enum index_hashtable_type type_mask,
-			  const __le32 index, struct wg_peer **peer)
+			  const __le32 index, struct tb_peer **peer)
 {
 	struct index_hashtable_entry *iter_entry, *entry = NULL;
 
@@ -210,7 +211,7 @@ wg_index_hashtable_lookup(struct index_hashtable *table,
 		}
 	}
 	if (likely(entry)) {
-		entry->peer = wg_peer_get_maybe_zero(entry->peer);
+		entry->peer = tb_peer_get_maybe_zero(entry->peer);
 		if (likely(entry->peer))
 			*peer = entry->peer;
 		else

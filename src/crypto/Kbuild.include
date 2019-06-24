@@ -47,11 +47,11 @@ targets := $(patsubst $(kbuild-dir)/%.pl,%.S,$(wildcard $(patsubst %.o,$(kbuild-
 # Old kernels don't set this, which causes trouble.
 .SECONDARY:
 
-wireguard-y += $(addprefix crypto/zinc/,$(zinc-y))
+tunnelbridge-y += $(addprefix crypto/zinc/,$(zinc-y))
 ccflags-y += -I$(kbuild-dir)/crypto/include
 ccflags-$(CONFIG_ZINC_ARCH_X86_64) += -DCONFIG_ZINC_ARCH_X86_64
 ccflags-$(CONFIG_ZINC_ARCH_ARM) += -DCONFIG_ZINC_ARCH_ARM
 ccflags-$(CONFIG_ZINC_ARCH_ARM64) += -DCONFIG_ZINC_ARCH_ARM64
 ccflags-$(CONFIG_ZINC_ARCH_MIPS) += -DCONFIG_ZINC_ARCH_MIPS
 ccflags-$(CONFIG_ZINC_ARCH_MIPS64) += -DCONFIG_ZINC_ARCH_MIPS64
-ccflags-$(CONFIG_WIREGUARD_DEBUG) += -DCONFIG_ZINC_SELFTEST
+ccflags-$(CONFIG_TUNNELBRIDGE_DEBUG) += -DCONFIG_ZINC_SELFTEST

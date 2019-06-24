@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
@@ -19,7 +20,7 @@ static bool color_mode(FILE *file)
 
 	if (mode != -1)
 		return mode;
-	var = getenv("WG_COLOR_MODE");
+	var = getenv("TB_COLOR_MODE");
 	if (var && !strcmp(var, "always"))
 		mode = true;
 	else if (var && !strcmp(var, "never"))

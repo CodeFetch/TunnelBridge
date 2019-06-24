@@ -1,12 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
 #include "queueing.h"
 
 struct multicore_worker __percpu *
-wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr)
+tb_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr)
 {
 	int cpu;
 	struct multicore_worker __percpu *worker =
@@ -22,7 +23,7 @@ wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr)
 	return worker;
 }
 
-int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
+int tb_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 			 bool multicore, unsigned int len)
 {
 	int ret;
@@ -33,7 +34,7 @@ int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 		return ret;
 	if (function) {
 		if (multicore) {
-			queue->worker = wg_packet_percpu_multicore_worker_alloc(
+			queue->worker = tb_packet_percpu_multicore_worker_alloc(
 				function, queue);
 			if (!queue->worker)
 				return -ENOMEM;
@@ -44,7 +45,7 @@ int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 	return 0;
 }
 
-void wg_packet_queue_free(struct crypt_queue *queue, bool multicore)
+void tb_packet_queue_free(struct crypt_queue *queue, bool multicore)
 {
 	if (multicore)
 		free_percpu(queue->worker);

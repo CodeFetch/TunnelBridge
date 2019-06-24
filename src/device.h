@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#ifndef _WG_DEVICE_H
-#define _WG_DEVICE_H
+#ifndef _TB_DEVICE_H
+#define _TB_DEVICE_H
 
 #include "noise.h"
 #include "allowedips.h"
@@ -18,7 +19,7 @@
 #include <linux/net.h>
 #include <linux/ptr_ring.h>
 
-struct wg_device;
+struct tb_device;
 
 struct multicore_worker {
 	void *ptr;
@@ -36,7 +37,7 @@ struct crypt_queue {
 	};
 };
 
-struct wg_device {
+struct tb_device {
 	struct net_device *dev;
 	struct crypt_queue encrypt_queue, decrypt_queue;
 	struct sock __rcu *sock4, *sock6;
@@ -59,7 +60,7 @@ struct wg_device {
 	bool have_creating_net_ref;
 };
 
-int wg_device_init(void);
-void wg_device_uninit(void);
+int tb_device_init(void);
+void tb_device_uninit(void);
 
-#endif /* _WG_DEVICE_H */
+#endif /* _TB_DEVICE_H */

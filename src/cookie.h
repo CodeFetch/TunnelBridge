@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
+ * Copyright (C) 2019 Vincent Wiemann <vincent.wiemann@ironai.com>
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#ifndef _WG_COOKIE_H
-#define _WG_COOKIE_H
+#ifndef _TB_COOKIE_H
+#define _TB_COOKIE_H
 
 #include "messages.h"
 #include <linux/rwsem.h>
 
-struct wg_peer;
+struct tb_peer;
 
 struct cookie_checker {
 	u8 secret[NOISE_HASH_LEN];
@@ -17,7 +18,7 @@ struct cookie_checker {
 	u8 message_mac1_key[NOISE_SYMMETRIC_KEY_LEN];
 	u64 secret_birthdate;
 	struct rw_semaphore secret_lock;
-	struct wg_device *device;
+	struct tb_device *device;
 };
 
 struct cookie {
@@ -38,22 +39,22 @@ enum cookie_mac_state {
 	VALID_MAC_WITH_COOKIE
 };
 
-void wg_cookie_checker_init(struct cookie_checker *checker,
-			    struct wg_device *wg);
-void wg_cookie_checker_precompute_device_keys(struct cookie_checker *checker);
-void wg_cookie_checker_precompute_peer_keys(struct wg_peer *peer);
-void wg_cookie_init(struct cookie *cookie);
+void tb_cookie_checker_init(struct cookie_checker *checker,
+			    struct tb_device *tb);
+void tb_cookie_checker_precompute_device_keys(struct cookie_checker *checker);
+void tb_cookie_checker_precompute_peer_keys(struct tb_peer *peer);
+void tb_cookie_init(struct cookie *cookie);
 
-enum cookie_mac_state wg_cookie_validate_packet(struct cookie_checker *checker,
+enum cookie_mac_state tb_cookie_validate_packet(struct cookie_checker *checker,
 						struct sk_buff *skb,
 						bool check_cookie);
-void wg_cookie_add_mac_to_packet(void *message, size_t len,
-				 struct wg_peer *peer);
+void tb_cookie_add_mac_to_packet(void *message, size_t len,
+				 struct tb_peer *peer);
 
-void wg_cookie_message_create(struct message_handshake_cookie *src,
+void tb_cookie_message_create(struct message_handshake_cookie *src,
 			      struct sk_buff *skb, __le32 index,
 			      struct cookie_checker *checker);
-void wg_cookie_message_consume(struct message_handshake_cookie *src,
-			       struct wg_device *wg);
+void tb_cookie_message_consume(struct message_handshake_cookie *src,
+			       struct tb_device *tb);
 
-#endif /* _WG_COOKIE_H */
+#endif /* _TB_COOKIE_H */

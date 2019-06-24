@@ -3,8 +3,8 @@
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#ifndef _WG_SIMD_H
-#define _WG_SIMD_H
+#ifndef _TB_SIMD_H
+#define _TB_SIMD_H
 
 #include <linux/sched.h>
 #include <asm/simd.h>
@@ -67,4 +67,4 @@ static __must_check inline bool simd_use(simd_context_t *ctx)
 	return true;
 }
 
-#endif /* _WG_SIMD_H */
+#endif /* _TB_SIMD_H */
