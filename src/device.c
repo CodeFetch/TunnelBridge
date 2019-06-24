@@ -123,60 +123,31 @@ static int tb_stop(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t tb_xmit(struct sk_buff *skb, struct net_device *dev)
+void tb_xmit_peer(struct sk_buff *skb, struct net_device *dev, struct tb_peer *peer)
 {
-	struct tb_device *tb = netdev_priv(dev);
 	struct sk_buff_head packets;
-	struct tb_peer *peer;
 	struct sk_buff *next;
-	sa_family_t family;
-	u32 mtu;
-	int ret;
 
-	if (unlikely(tb_skb_examine_untrusted_ip_hdr(skb) != skb->protocol)) {
-		ret = -EPROTONOSUPPORT;
-		net_dbg_ratelimited("%s: Invalid IP packet\n", dev->name);
-		goto err;
-	}
+	if (unlikely(!skb))
+		return;
 
-	peer = tb_allowedips_lookup_dst(&tb->peer_allowedips, skb);
-	if (unlikely(!peer)) {
-		ret = -ENOKEY;
-		if (skb->protocol == htons(ETH_P_IP))
-			net_dbg_ratelimited("%s: No peer has allowed IPs matching %pI4\n",
-					    dev->name, &ip_hdr(skb)->daddr);
-		else if (skb->protocol == htons(ETH_P_IPV6))
-			net_dbg_ratelimited("%s: No peer has allowed IPs matching %pI6\n",
-					    dev->name, &ipv6_hdr(skb)->daddr);
-		goto err;
-	}
-
-	family = READ_ONCE(peer->endpoint.addr.sa_family);
-	if (unlikely(family != AF_INET && family != AF_INET6)) {
-		ret = -EDESTADDRREQ;
-		net_dbg_ratelimited("%s: No valid endpoint has been configured or discovered for peer %llu\n",
-				    dev->name, peer->internal_id);
-		goto err_peer;
-	}
-
-	mtu = skb_dst(skb) ? dst_mtu(skb_dst(skb)) : dev->mtu;
+	debug_print_skb_dump(skb, "tb: device.c: tb_xmit_peer");
 
 	__skb_queue_head_init(&packets);
 	if (!skb_is_gso(skb)) {
-		skb_mark_not_on_list(skb);
+		skb->next = NULL;
 	} else {
 		struct sk_buff *segs = skb_gso_segment(skb, 0);
 
-		if (unlikely(IS_ERR(segs))) {
-			ret = PTR_ERR(segs);
-			goto err_peer;
-		}
+		if (unlikely(IS_ERR(segs)))
+			goto err;
+
 		dev_kfree_skb(skb);
 		skb = segs;
 	}
 	do {
 		next = skb->next;
-		skb_mark_not_on_list(skb);
+		skb->next = skb->prev = NULL;
 
 		skb = skb_share_check(skb, GFP_ATOMIC);
 		if (unlikely(!skb))
@@ -187,7 +158,7 @@ static netdev_tx_t tb_xmit(struct sk_buff *skb, struct net_device *dev)
 		 */
 		skb_dst_drop(skb);
 
-		PACKET_CB(skb)->mtu = mtu;
+		PACKET_CB(skb)->mtu = dev->mtu;
 
 		__skb_queue_tail(&packets, skb);
 	} while ((skb = next) != NULL);
@@ -206,17 +177,96 @@ static netdev_tx_t tb_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	tb_packet_send_staged_packets(peer);
 
-	tb_peer_put(peer);
-	return NETDEV_TX_OK;
-
-err_peer:
-	tb_peer_put(peer);
 err:
 	++dev->stats.tx_errors;
-	if (skb->protocol == htons(ETH_P_IP))
-		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH, 0);
-	else if (skb->protocol == htons(ETH_P_IPV6))
-		icmpv6_send(skb, ICMPV6_DEST_UNREACH, ICMPV6_ADDR_UNREACH, 0);
+	kfree_skb(skb);
+}
+
+void tb_xmit_broadcast(struct sk_buff *skb, struct net_device *dev, 
+					  struct tb_peer *sender)
+{
+	struct tb_device *tb = netdev_priv(dev);
+	struct tb_peer *peer = NULL;
+	int i;
+
+	if(unlikely(!skb))
+		return;
+
+	debug_print_skb_dump(skb, "tb: device.c: tb_xmit_broadcast");
+
+	rcu_read_lock_bh();
+	/*!memcmp(peer->handshake.remote_static, sender->handshake.remote_static, NOISE_PUBLIC_KEY_LEN)*/
+
+	tb_hash_for_each_rcu_bh(tb->peer_hashtable.hashtable, i, peer, pubkey_hash)
+		if (!sender || peer != sender)
+			tb_xmit_peer(skb_copy(skb, GFP_ATOMIC), dev, peer);
+
+	rcu_read_unlock_bh();
+
+	kfree_skb(skb);
+}
+
+static netdev_tx_t tb_xmit(struct sk_buff *skb, struct net_device *dev)
+{
+	struct tb_device *tb = netdev_priv(dev);
+	struct tb_peer *peer;
+	struct tb_client *client = NULL;
+	int ret;
+
+	skb = skb_share_check(skb, GFP_ATOMIC);
+
+	debug_print_skb_dump(skb, "tb: device.c: tb_xmit");
+
+	if(unlikely(!skb)) {
+		++dev->stats.tx_errors;
+		return -ENOBUFS;
+	}
+
+	/* Lookup source address */
+	client = tb_client_lookup_src(&tb->client_hashtable, skb);
+	if(likely(client)) {
+		if(client->peer) {
+			/* Has roamed to us */
+			tb_client_update_peer(client, NULL);
+			tb_peer_put(client->peer);
+		}
+
+		tb_client_put(client);
+	} else {
+		/* New client - Does not take reference on new client */
+		tb_client_create(tb, NULL, (const u8 *)&eth_hdr(skb)->h_source);
+	}
+
+	PACKET_CB(skb)->mtu = dev->mtu;
+
+	/* Lookup destination address */
+	if (is_multicast_ether_addr((const u8 *)&eth_hdr(skb)->h_dest)) {
+		 /* Packet is multicast -> send to all peers */
+		tb_xmit_broadcast(skb, dev, NULL);
+	} else {
+		client = tb_client_lookup_dst(&tb->client_hashtable, skb);
+
+		if(likely(client)) {
+			if(client->peer) {
+				/* Send packet to peer */
+				tb_xmit_peer(skb, dev, peer);
+			} else {
+				/* Destination is local -> ignore */
+				tb_client_put(client);
+				ret = NETDEV_TX_OK;
+				goto out;
+			}
+
+			tb_client_put(client);
+		} else {
+			/* We don't know the destination -> send packet to all peers */
+			tb_xmit_broadcast(skb, dev, NULL);
+		}
+	}
+
+	return NETDEV_TX_OK;
+
+out:
 	kfree_skb(skb);
 	return ret;
 }
@@ -270,13 +320,11 @@ static void tb_setup(struct net_device *dev)
 				    NETIF_F_SG | NETIF_F_GSO |
 				    NETIF_F_GSO_SOFTWARE | NETIF_F_HIGHDMA };
 
+	ether_setup(dev);
 	dev->netdev_ops = &netdev_ops;
-	dev->hard_header_len = 0;
-	dev->addr_len = 0;
+	random_ether_addr(dev->dev_addr);
 	dev->needed_headroom = DATA_PACKET_HEAD_ROOM;
 	dev->needed_tailroom = noise_encrypted_len(MESSAGE_PADDING_MULTIPLE);
-	dev->type = ARPHRD_NONE;
-	dev->flags = IFF_POINTOPOINT | IFF_NOARP;
 #ifndef COMPAT_CANNOT_USE_IFF_NO_QUEUE
 	dev->priv_flags |= IFF_NO_QUEUE;
 #else
@@ -287,7 +335,7 @@ static void tb_setup(struct net_device *dev)
 	dev->hw_features |= TB_NETDEV_FEATURES;
 	dev->hw_enc_features |= TB_NETDEV_FEATURES;
 	dev->mtu = ETH_DATA_LEN - MESSAGE_MINIMUM_LENGTH -
-		   sizeof(struct udphdr) -
+		   sizeof(struct udphdr) - sizeof(struct ethhdr) -
 		   max(sizeof(struct ipv6hdr), sizeof(struct iphdr));
 
 	SET_NETDEV_DEVTYPE(dev, &device_type);
@@ -311,7 +359,7 @@ static int tb_newlink(struct net *src_net, struct net_device *dev,
 	mutex_init(&tb->socket_update_lock);
 	mutex_init(&tb->device_update_lock);
 	skb_queue_head_init(&tb->incoming_handshakes);
-	tb_allowedips_init(&tb->peer_allowedips);
+	tb_client_init(tb);
 	tb_cookie_checker_init(&tb->cookie_checker, tb);
 	INIT_LIST_HEAD(&tb->peer_list);
 	tb->device_update_gen = 1;

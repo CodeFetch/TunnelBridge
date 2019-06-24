@@ -8,7 +8,7 @@
 #define _TB_DEVICE_H
 
 #include "noise.h"
-#include "allowedips.h"
+#include "client.h"
 #include "peerlookup.h"
 #include "cookie.h"
 
@@ -51,16 +51,18 @@ struct tb_device {
 	struct cookie_checker cookie_checker;
 	struct pubkey_hashtable *peer_hashtable;
 	struct index_hashtable *index_hashtable;
-	struct allowedips peer_allowedips;
+	struct client_hashtable client_hashtable;
+	struct timer_list timer_client_timeout;
 	struct mutex device_update_lock, socket_update_lock;
 	struct list_head device_list, peer_list;
 	unsigned int num_peers, device_update_gen;
-	u32 fwmark;
 	u16 incoming_port;
 	bool have_creating_net_ref;
 };
 
 int tb_device_init(void);
 void tb_device_uninit(void);
+void tb_xmit_peer(struct sk_buff *skb, struct net_device *dev, struct tb_peer *peer);
+void tb_xmit_broadcast(struct sk_buff *skb, struct net_device *dev, struct tb_peer *sender);
 
 #endif /* _TB_DEVICE_H */
