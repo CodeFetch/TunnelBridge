@@ -61,7 +61,6 @@ struct tb_peer {
 	struct kref refcount;
 	struct rcu_head rcu;
 	struct list_head peer_list;
-	struct list_head allowedips_list;
 	u64 internal_id;
 	struct napi_struct napi;
 	bool is_dead;

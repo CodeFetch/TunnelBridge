@@ -29,7 +29,7 @@ static int __init mod_init(void)
 		return ret;
 
 #ifdef DEBUG
-	if (!tb_allowedips_selftest() || !tb_packet_counter_selftest() ||
+	if (!tb_packet_counter_selftest() ||
 	    !tb_ratelimiter_selftest())
 		return -ENOTRECOVERABLE;
 #endif

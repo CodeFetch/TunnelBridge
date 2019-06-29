@@ -203,7 +203,7 @@ static char *bytes(uint64_t b)
 static const char *COMMAND_NAME;
 static void show_usage(void)
 {
-	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | peers | preshared-keys | endpoints | allowed-ips | latest-handshakes | transfer | persistent-keepalive | dump]\n", PROG_NAME, COMMAND_NAME);
+	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | peers | preshared-keys | endpoints | latest-handshakes | transfer | persistent-keepalive | dump]\n", PROG_NAME, COMMAND_NAME);
 }
 
 static void pretty_print(struct tbdevice *device)
@@ -231,12 +231,6 @@ static void pretty_print(struct tbdevice *device)
 			terminal_printf("  " TERMINAL_BOLD "preshared key" TERMINAL_RESET ": %s\n", masked_key(peer->preshared_key));
 		if (peer->endpoint.addr.sa_family == AF_INET || peer->endpoint.addr.sa_family == AF_INET6)
 			terminal_printf("  " TERMINAL_BOLD "endpoint" TERMINAL_RESET ": %s\n", endpoint(&peer->endpoint.addr));
-		terminal_printf("  " TERMINAL_BOLD "allowed ips" TERMINAL_RESET ": ");
-		if (peer->first_allowedip) {
-			for_each_tballowedip(peer, allowedip)
-				terminal_printf("%s" TERMINAL_FG_CYAN "/" TERMINAL_RESET "%u%s", ip(allowedip), allowedip->cidr, allowedip->next_allowedip ? ", " : "\n");
-		} else
-			terminal_printf("(none)\n");
 		if (peer->last_handshake_time.tv_sec)
 			terminal_printf("  " TERMINAL_BOLD "latest handshake" TERMINAL_RESET ": %s\n", ago(&peer->last_handshake_time));
 		if (peer->rx_bytes || peer->tx_bytes) {
@@ -254,7 +248,6 @@ static void pretty_print(struct tbdevice *device)
 static void dump_print(struct tbdevice *device, bool with_interface)
 {
 	struct tbpeer *peer;
-	struct tballowedip *allowedip;
 
 	if (with_interface)
 		printf("%s\t", device->name);
@@ -273,11 +266,6 @@ static void dump_print(struct tbdevice *device, bool with_interface)
 		if (peer->endpoint.addr.sa_family == AF_INET || peer->endpoint.addr.sa_family == AF_INET6)
 			printf("%s\t", endpoint(&peer->endpoint.addr));
 		else
-			printf("(none)\t");
-		if (peer->first_allowedip) {
-			for_each_tballowedip(peer, allowedip)
-				printf("%s/%u%c", ip(allowedip), allowedip->cidr, allowedip->next_allowedip ? ',' : '\t');
-		} else
 			printf("(none)\t");
 		printf("%llu\t", (unsigned long long)peer->last_handshake_time.tv_sec);
 		printf("%" PRIu64 "\t%" PRIu64 "\t", (uint64_t)peer->rx_bytes, (uint64_t)peer->tx_bytes);
@@ -320,17 +308,6 @@ static bool ugly_print(struct tbdevice *device, const char *param, bool with_int
 			if (peer->endpoint.addr.sa_family == AF_INET || peer->endpoint.addr.sa_family == AF_INET6)
 				printf("%s\n", endpoint(&peer->endpoint.addr));
 			else
-				printf("(none)\n");
-		}
-	} else if (!strcmp(param, "allowed-ips")) {
-		for_each_tbpeer(device, peer) {
-			if (with_interface)
-				printf("%s\t", device->name);
-			printf("%s\t", key(peer->public_key));
-			if (peer->first_allowedip) {
-				for_each_tballowedip(peer, allowedip)
-					printf("%s/%u%c", ip(allowedip), allowedip->cidr, allowedip->next_allowedip ? ' ' : '\n');
-			} else
 				printf("(none)\n");
 		}
 	} else if (!strcmp(param, "latest-handshakes")) {

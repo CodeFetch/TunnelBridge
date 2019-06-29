@@ -96,7 +96,6 @@ static int add_next_to_inflatable_buffer(struct inflatable_buffer *buffer)
 	return 0;
 }
 
-#ifndef WINCOMPAT
 static FILE *userspace_interface_file(const char *interface)
 {
 	struct stat sbuf;
@@ -199,9 +198,6 @@ out:
 	closedir(dir);
 	return ret;
 }
-#else
-#include "wincompat/ipc.c"
-#endif
 
 static int userspace_set_device(struct tbdevice *dev)
 {
@@ -217,6 +213,11 @@ static int userspace_set_device(struct tbdevice *dev)
 		return -errno;
 	fprintf(f, "set=1\n");
 
+	if (dev->flags & TBDEVICE_ETH) {
+		fprintf(f, "ethernet=true\n");
+		if (dev->flags & TBDEVICE_ETH_FORWARDING)
+			fprintf(f, "ethernet_forwarding=true\n");
+	}
 	if (dev->flags & TBDEVICE_HAS_PRIVATE_KEY) {
 		key_to_hex(hex, dev->private_key);
 		fprintf(f, "private_key=%s\n", hex);
@@ -515,8 +516,7 @@ static int kernel_set_device(struct tbdevice *dev)
 {
 	int ret = 0;
 	struct tbpeer *peer = NULL;
-	struct tballowedip *allowedip = NULL;
-	struct nlattr *peers_nest, *peer_nest, *allowedips_nest, *allowedip_nest;
+	struct nlattr *peers_nest, *peer_nest;
 	struct nlmsghdr *nlh;
 	struct mnlg_socket *nlg;
 
@@ -544,7 +544,7 @@ again:
 	}
 	if (!dev->first_peer)
 		goto send;
-	peers_nest = peer_nest = allowedips_nest = allowedip_nest = NULL;
+	peers_nest = peer_nest = NULL;
 	peers_nest = mnl_attr_nest_start(nlh, TBDEVICE_A_PEERS);
 	for (peer = peer ? peer : dev->first_peer; peer; peer = peer->next_peer) {
 		uint32_t flags = 0;
@@ -556,55 +556,9 @@ again:
 			goto toobig_peers;
 		if (peer->flags & TBPEER_REMOVE_ME)
 			flags |= TBPEER_F_REMOVE_ME;
-		if (!allowedip) {
-			if (peer->flags & TBPEER_REPLACE_ALLOWEDIPS)
-				flags |= TBPEER_F_REPLACE_ALLOWEDIPS;
-			if (peer->flags & TBPEER_HAS_PRESHARED_KEY) {
-				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_PRESHARED_KEY, sizeof(peer->preshared_key), peer->preshared_key))
-					goto toobig_peers;
-			}
-			if (peer->endpoint.addr.sa_family == AF_INET) {
-				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_ENDPOINT, sizeof(peer->endpoint.addr4), &peer->endpoint.addr4))
-					goto toobig_peers;
-			} else if (peer->endpoint.addr.sa_family == AF_INET6) {
-				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_ENDPOINT, sizeof(peer->endpoint.addr6), &peer->endpoint.addr6))
-					goto toobig_peers;
-			}
-			if (peer->flags & TBPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL) {
-				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_PERSISTENT_KEEPALIVE_INTERVAL, peer->persistent_keepalive_interval))
-					goto toobig_peers;
-			}
-		}
 		if (flags) {
 			if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_FLAGS, flags))
 				goto toobig_peers;
-		}
-		if (peer->first_allowedip) {
-			if (!allowedip)
-				allowedip = peer->first_allowedip;
-			allowedips_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, TBPEER_A_ALLOWEDIPS);
-			if (!allowedips_nest)
-				goto toobig_allowedips;
-			for (; allowedip; allowedip = allowedip->next_allowedip) {
-				allowedip_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, 0);
-				if (!allowedip_nest)
-					goto toobig_allowedips;
-				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_FAMILY, allowedip->family))
-					goto toobig_allowedips;
-				if (allowedip->family == AF_INET) {
-					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_IPADDR, sizeof(allowedip->ip4), &allowedip->ip4))
-						goto toobig_allowedips;
-				} else if (allowedip->family == AF_INET6) {
-					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_IPADDR, sizeof(allowedip->ip6), &allowedip->ip6))
-						goto toobig_allowedips;
-				}
-				if (!mnl_attr_put_u8_check(nlh, SOCKET_BUFFER_SIZE, TBALLOWEDIP_A_CIDR_MASK, allowedip->cidr))
-					goto toobig_allowedips;
-				mnl_attr_nest_end(nlh, allowedip_nest);
-				allowedip_nest = NULL;
-			}
-			mnl_attr_nest_end(nlh, allowedips_nest);
-			allowedips_nest = NULL;
 		}
 
 		mnl_attr_nest_end(nlh, peer_nest);
@@ -612,14 +566,6 @@ again:
 	}
 	mnl_attr_nest_end(nlh, peers_nest);
 	peers_nest = NULL;
-	goto send;
-toobig_allowedips:
-	if (allowedip_nest)
-		mnl_attr_nest_cancel(nlh, allowedip_nest);
-	if (allowedips_nest)
-		mnl_attr_nest_end(nlh, allowedips_nest);
-	mnl_attr_nest_end(nlh, peer_nest);
-	mnl_attr_nest_end(nlh, peers_nest);
 	goto send;
 toobig_peers:
 	if (peer_nest)
@@ -643,56 +589,6 @@ out:
 	mnlg_socket_close(nlg);
 	errno = -ret;
 	return ret;
-}
-
-static int parse_allowedip(const struct nlattr *attr, void *data)
-{
-	struct tballowedip *allowedip = data;
-
-	switch (mnl_attr_get_type(attr)) {
-	case TBALLOWEDIP_A_UNSPEC:
-		break;
-	case TBALLOWEDIP_A_FAMILY:
-		if (!mnl_attr_validate(attr, MNL_TYPE_U16))
-			allowedip->family = mnl_attr_get_u16(attr);
-		break;
-	case TBALLOWEDIP_A_IPADDR:
-		if (mnl_attr_get_payload_len(attr) == sizeof(allowedip->ip4))
-			memcpy(&allowedip->ip4, mnl_attr_get_payload(attr), sizeof(allowedip->ip4));
-		else if (mnl_attr_get_payload_len(attr) == sizeof(allowedip->ip6))
-			memcpy(&allowedip->ip6, mnl_attr_get_payload(attr), sizeof(allowedip->ip6));
-		break;
-	case TBALLOWEDIP_A_CIDR_MASK:
-		if (!mnl_attr_validate(attr, MNL_TYPE_U8))
-			allowedip->cidr = mnl_attr_get_u8(attr);
-		break;
-	}
-
-	return MNL_CB_OK;
-}
-
-static int parse_allowedips(const struct nlattr *attr, void *data)
-{
-	struct tbpeer *peer = data;
-	struct tballowedip *new_allowedip = calloc(1, sizeof(*new_allowedip));
-	int ret;
-
-	if (!new_allowedip) {
-		perror("calloc");
-		return MNL_CB_ERROR;
-	}
-	if (!peer->first_allowedip)
-		peer->first_allowedip = peer->last_allowedip = new_allowedip;
-	else {
-		peer->last_allowedip->next_allowedip = new_allowedip;
-		peer->last_allowedip = new_allowedip;
-	}
-	ret = mnl_attr_parse_nested(attr, parse_allowedip, new_allowedip);
-	if (!ret)
-		return ret;
-	if (!((new_allowedip->family == AF_INET && new_allowedip->cidr <= 32) || (new_allowedip->family == AF_INET6 && new_allowedip->cidr <= 128)))
-		return MNL_CB_ERROR;
-	return MNL_CB_OK;
 }
 
 static int parse_peer(const struct nlattr *attr, void *data)
@@ -830,13 +726,7 @@ static void coalesce_peers(struct tbdevice *device)
 			peer = peer->next_peer;
 			continue;
 		}
-		if (!peer->first_allowedip) {
-			peer->first_allowedip = peer->next_peer->first_allowedip;
-			peer->last_allowedip = peer->next_peer->last_allowedip;
-		} else {
-			peer->last_allowedip->next_allowedip = peer->next_peer->first_allowedip;
-			peer->last_allowedip = peer->next_peer->last_allowedip;
-		}
+
 		old_next_peer = peer->next_peer;
 		peer->next_peer = old_next_peer->next_peer;
 		free(old_next_peer);

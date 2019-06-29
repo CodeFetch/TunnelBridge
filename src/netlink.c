@@ -37,7 +37,6 @@ static const struct nla_policy peer_policy[TBPEER_A_MAX + 1] = {
 	[TBPEER_A_LAST_HANDSHAKE_TIME]			= { .type = NLA_EXACT_LEN, .len = sizeof(struct __kernel_timespec) },
 	[TBPEER_A_RX_BYTES]				= { .type = NLA_U64 },
 	[TBPEER_A_TX_BYTES]				= { .type = NLA_U64 },
-	[TBPEER_A_ALLOWEDIPS]				= { .type = NLA_NESTED },
 	[TBPEER_A_PROTOCOL_VERSION]			= { .type = NLA_U32 }
 };
 
@@ -70,33 +69,10 @@ static struct tb_device *lookup_interface(struct nlattr **attrs,
 	return netdev_priv(dev);
 }
 
-static int get_allowedips(struct sk_buff *skb, const u8 *ip, u8 cidr,
-			  int family)
-{
-	struct nlattr *allowedip_nest;
-
-	allowedip_nest = nla_nest_start(skb, 0);
-	if (!allowedip_nest)
-		return -EMSGSIZE;
-
-	if (nla_put_u8(skb, TBALLOWEDIP_A_CIDR_MASK, cidr) ||
-	    nla_put_u16(skb, TBALLOWEDIP_A_FAMILY, family) ||
-	    nla_put(skb, TBALLOWEDIP_A_IPADDR, family == AF_INET6 ?
-		    sizeof(struct in6_addr) : sizeof(struct in_addr), ip)) {
-		nla_nest_cancel(skb, allowedip_nest);
-		return -EMSGSIZE;
-	}
-
-	nla_nest_end(skb, allowedip_nest);
-	return 0;
-}
-
 static int
-get_peer(struct tb_peer *peer, struct allowedips_node **next_allowedips_node,
-	 u64 *allowedips_seq, struct sk_buff *skb)
+get_peer(struct tb_peer *peer, struct sk_buff *skb)
 {
-	struct nlattr *allowedips_nest, *peer_nest = nla_nest_start(skb, 0);
-	struct allowedips_node *allowedips_node = *next_allowedips_node;
+	struct nlattr *peer_nest = nla_nest_start(skb, 0);
 	bool fail;
 
 	if (!peer_nest)
@@ -109,76 +85,45 @@ get_peer(struct tb_peer *peer, struct allowedips_node **next_allowedips_node,
 	if (fail)
 		goto err;
 
-	if (!allowedips_node) {
-		const struct __kernel_timespec last_handshake = {
-			.tv_sec = peer->walltime_last_handshake.tv_sec,
-			.tv_nsec = peer->walltime_last_handshake.tv_nsec
-		};
+	const struct __kernel_timespec last_handshake = {
+		.tv_sec = peer->walltime_last_handshake.tv_sec,
+		.tv_nsec = peer->walltime_last_handshake.tv_nsec
+	};
 
-		down_read(&peer->handshake.lock);
-		fail = nla_put(skb, TBPEER_A_PRESHARED_KEY,
-			       NOISE_SYMMETRIC_KEY_LEN,
-			       peer->handshake.preshared_key);
-		up_read(&peer->handshake.lock);
-		if (fail)
-			goto err;
-
-		if (nla_put(skb, TBPEER_A_LAST_HANDSHAKE_TIME,
-			    sizeof(last_handshake), &last_handshake) ||
-		    nla_put_u16(skb, TBPEER_A_PERSISTENT_KEEPALIVE_INTERVAL,
-				peer->persistent_keepalive_interval) ||
-		    nla_put_u64_64bit(skb, TBPEER_A_TX_BYTES, peer->tx_bytes,
-				      TBPEER_A_UNSPEC) ||
-		    nla_put_u64_64bit(skb, TBPEER_A_RX_BYTES, peer->rx_bytes,
-				      TBPEER_A_UNSPEC) ||
-		    nla_put_u32(skb, TBPEER_A_PROTOCOL_VERSION, 1))
-			goto err;
-
-		read_lock_bh(&peer->endpoint_lock);
-		if (peer->endpoint.addr.sa_family == AF_INET)
-			fail = nla_put(skb, TBPEER_A_ENDPOINT,
-				       sizeof(peer->endpoint.addr4),
-				       &peer->endpoint.addr4);
-		else if (peer->endpoint.addr.sa_family == AF_INET6)
-			fail = nla_put(skb, TBPEER_A_ENDPOINT,
-				       sizeof(peer->endpoint.addr6),
-				       &peer->endpoint.addr6);
-		read_unlock_bh(&peer->endpoint_lock);
-		if (fail)
-			goto err;
-		allowedips_node =
-			list_first_entry_or_null(&peer->allowedips_list,
-					struct allowedips_node, peer_list);
-	}
-	if (!allowedips_node)
-		goto no_allowedips;
-	if (!*allowedips_seq)
-		*allowedips_seq = peer->device->peer_allowedips.seq;
-	else if (*allowedips_seq != peer->device->peer_allowedips.seq)
-		goto no_allowedips;
-
-	allowedips_nest = nla_nest_start(skb, TBPEER_A_ALLOWEDIPS);
-	if (!allowedips_nest)
+	down_read(&peer->handshake.lock);
+	fail = nla_put(skb, TBPEER_A_PRESHARED_KEY,
+		       NOISE_SYMMETRIC_KEY_LEN,
+		       peer->handshake.preshared_key);
+	up_read(&peer->handshake.lock);
+	if (fail)
 		goto err;
 
-	list_for_each_entry_from(allowedips_node, &peer->allowedips_list,
-				 peer_list) {
-		u8 cidr, ip[16] __aligned(__alignof(u64));
-		int family;
+	if (nla_put(skb, TBPEER_A_LAST_HANDSHAKE_TIME,
+		    sizeof(last_handshake), &last_handshake) ||
+	    nla_put_u16(skb, TBPEER_A_PERSISTENT_KEEPALIVE_INTERVAL,
+			peer->persistent_keepalive_interval) ||
+	    nla_put_u64_64bit(skb, TBPEER_A_TX_BYTES, peer->tx_bytes,
+			      TBPEER_A_UNSPEC) ||
+	    nla_put_u64_64bit(skb, TBPEER_A_RX_BYTES, peer->rx_bytes,
+			      TBPEER_A_UNSPEC) ||
+	    nla_put_u32(skb, TBPEER_A_PROTOCOL_VERSION, 1))
+		goto err;
 
-		family = tb_allowedips_read_node(allowedips_node, ip, &cidr);
-		if (get_allowedips(skb, ip, cidr, family)) {
-			nla_nest_end(skb, allowedips_nest);
-			nla_nest_end(skb, peer_nest);
-			*next_allowedips_node = allowedips_node;
-			return -EMSGSIZE;
-		}
+	read_lock_bh(&peer->endpoint_lock);
+	if (peer->endpoint.addr.sa_family == AF_INET)
+		fail = nla_put(skb, TBPEER_A_ENDPOINT,
+			       sizeof(peer->endpoint.addr4),
+			       &peer->endpoint.addr4);
+	else if (peer->endpoint.addr.sa_family == AF_INET6)
+		fail = nla_put(skb, TBPEER_A_ENDPOINT,
+			       sizeof(peer->endpoint.addr6),
+			       &peer->endpoint.addr6);
+	read_unlock_bh(&peer->endpoint_lock);
+	if (fail)
+		goto err;
 	}
-	nla_nest_end(skb, allowedips_nest);
-no_allowedips:
+
 	nla_nest_end(skb, peer_nest);
-	*next_allowedips_node = NULL;
-	*allowedips_seq = 0;
 	return 0;
 err:
 	nla_nest_cancel(skb, peer_nest);
@@ -265,8 +210,7 @@ static int tb_get_device_dump(struct sk_buff *skb, struct netlink_callback *cb)
 	lockdep_assert_held(&tb->device_update_lock);
 	peer = list_prepare_entry(last_peer_cursor, &tb->peer_list, peer_list);
 	list_for_each_entry_continue(peer, &tb->peer_list, peer_list) {
-		if (get_peer(peer, (struct allowedips_node **)&cb->args[2],
-			     (u64 *)&cb->args[4] /* and args[5] */, skb)) {
+		if (get_peer(peer, skb)) {
 			done = false;
 			break;
 		}
@@ -325,34 +269,6 @@ static int set_port(struct tb_device *tb, u16 port)
 	return tb_socket_init(tb, port);
 }
 
-static int set_allowedip(struct tb_peer *peer, struct nlattr **attrs)
-{
-	int ret = -EINVAL;
-	u16 family;
-	u8 cidr;
-
-	if (!attrs[TBALLOWEDIP_A_FAMILY] || !attrs[TBALLOWEDIP_A_IPADDR] ||
-	    !attrs[TBALLOWEDIP_A_CIDR_MASK])
-		return ret;
-	family = nla_get_u16(attrs[TBALLOWEDIP_A_FAMILY]);
-	cidr = nla_get_u8(attrs[TBALLOWEDIP_A_CIDR_MASK]);
-
-	if (family == AF_INET && cidr <= 32 &&
-	    nla_len(attrs[TBALLOWEDIP_A_IPADDR]) == sizeof(struct in_addr))
-		ret = tb_allowedips_insert_v4(
-			&peer->device->peer_allowedips,
-			nla_data(attrs[TBALLOWEDIP_A_IPADDR]), cidr, peer,
-			&peer->device->device_update_lock);
-	else if (family == AF_INET6 && cidr <= 128 &&
-		 nla_len(attrs[TBALLOWEDIP_A_IPADDR]) == sizeof(struct in6_addr))
-		ret = tb_allowedips_insert_v6(
-			&peer->device->peer_allowedips,
-			nla_data(attrs[TBALLOWEDIP_A_IPADDR]), cidr, peer,
-			&peer->device->device_update_lock);
-
-	return ret;
-}
-
 static int set_peer(struct tb_device *tb, struct nlattr **attrs)
 {
 	u8 *public_key = NULL, *preshared_key = NULL;
@@ -384,9 +300,6 @@ static int set_peer(struct tb_device *tb, struct nlattr **attrs)
 		ret = -ENODEV;
 		if (flags & TBPEER_F_REMOVE_ME)
 			goto out; /* Tried to remove a non-existing peer. */
-
-		/* The peer is new, so there aren't allowed IPs to remove. */
-		flags &= ~TBPEER_F_REPLACE_ALLOWEDIPS;
 
 		down_read(&tb->static_identity.lock);
 		if (tb->static_identity.has_identity &&
@@ -439,25 +352,6 @@ static int set_peer(struct tb_device *tb, struct nlattr **attrs)
 
 			memcpy(&endpoint.addr, addr, len);
 			tb_socket_set_peer_endpoint(peer, &endpoint);
-		}
-	}
-
-	if (flags & TBPEER_F_REPLACE_ALLOWEDIPS)
-		tb_allowedips_remove_by_peer(&tb->peer_allowedips, peer,
-					     &tb->device_update_lock);
-
-	if (attrs[TBPEER_A_ALLOWEDIPS]) {
-		struct nlattr *attr, *allowedip[TBALLOWEDIP_A_MAX + 1];
-		int rem;
-
-		nla_for_each_nested(attr, attrs[TBPEER_A_ALLOWEDIPS], rem) {
-			ret = nla_parse_nested(allowedip, TBALLOWEDIP_A_MAX,
-					       attr, allowedip_policy, NULL);
-			if (ret < 0)
-				goto out;
-			ret = set_allowedip(peer, allowedip);
-			if (ret < 0)
-				goto out;
 		}
 	}
 
