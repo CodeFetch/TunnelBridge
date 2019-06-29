@@ -12,6 +12,7 @@
 #include <linux/skbuff.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
+#include <linux/if_ether.h>
 
 struct tb_device;
 struct tb_peer;
@@ -94,7 +95,7 @@ static inline void tb_reset_packet(struct sk_buff *skb)
 	skb->queue_mapping = 0;
 	skb->nohdr = 0;
 	skb->peeked = 0;
-	skb->mac_len = 0;
+	skb->mac_len = ETH_HLEN;
 	skb->dev = NULL;
 #ifdef CONFIG_NET_SCHED
 	skb->tc_index = 0;

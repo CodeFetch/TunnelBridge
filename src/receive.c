@@ -11,6 +11,8 @@
 #include "messages.h"
 #include "cookie.h"
 #include "socket.h"
+#include "client.h"
+#include "device.h"
 
 #include <linux/simd.h>
 #include <linux/ip.h>
@@ -344,8 +346,7 @@ static void tb_packet_consume_data_done(struct tb_peer *peer,
 					struct endpoint *endpoint)
 {
 	struct net_device *dev = peer->device->dev;
-	unsigned int len, len_before_trim;
-	struct tb_peer *routed_peer;
+	struct tb_client *client;
 
 	tb_socket_set_peer_endpoint(peer, endpoint);
 
@@ -371,15 +372,15 @@ static void tb_packet_consume_data_done(struct tb_peer *peer,
 
 	tb_timers_data_received(peer);
 
-	if (unlikely(skb_network_header(skb) < skb->head))
+	if (unlikely(skb_mac_header(skb) < skb->head))
 		goto dishonest_packet_size;
-	if (unlikely(!(pskb_network_may_pull(skb, sizeof(struct iphdr)) &&
-		       (ip_hdr(skb)->version == 4 ||
-			(ip_hdr(skb)->version == 6 &&
-			 pskb_network_may_pull(skb, sizeof(struct ipv6hdr)))))))
+	if (unlikely(!(pskb_may_pull(skb, ETH_HLEN))))
 		goto dishonest_packet_type;
 
-	skb->dev = dev;
+	skb->protocol = eth_type_trans(skb, dev);
+	skb_reset_network_header(skb);
+	debug_print_skb_dump(skb, "tb: receive.c: tb_packet_consume_data_done");
+
 	/* We've already verified the Poly1305 auth tag, which means this packet
 	 * was not modified in transit. We can therefore tell the networking
 	 * stack that all checksums of every layer of encapsulation have already
@@ -390,34 +391,48 @@ static void tb_packet_consume_data_done(struct tb_peer *peer,
 #ifndef COMPAT_CANNOT_USE_CSUM_LEVEL
 	skb->csum_level = ~0; /* All levels */
 #endif
-	skb->protocol = tb_skb_examine_untrusted_ip_hdr(skb);
-	if (skb->protocol == htons(ETH_P_IP)) {
-		len = ntohs(ip_hdr(skb)->tot_len);
-		if (unlikely(len < sizeof(struct iphdr)))
-			goto dishonest_packet_size;
-		if (INET_ECN_is_ce(PACKET_CB(skb)->ds))
-			IP_ECN_set_ce(ip_hdr(skb));
-	} else if (skb->protocol == htons(ETH_P_IPV6)) {
-		len = ntohs(ipv6_hdr(skb)->payload_len) +
-		      sizeof(struct ipv6hdr);
-		if (INET_ECN_is_ce(PACKET_CB(skb)->ds))
-			IP6_ECN_set_ce(skb, ipv6_hdr(skb));
+
+	/* TODO we may check the ethernet packet payload size here */
+
+	client = wg_client_lookup_src(&peer->device->client_hashtable, skb);
+
+	if (likely(client)) {
+		if(unlikely(client->peer != peer)) {
+			printk("Client has roamed");
+			/* Has roamed - Does not take reference on new client */
+			wg_client_update_peer(client, peer);
+		}
+
+		wg_client_put(client);
 	} else {
-		goto dishonest_packet_type;
+		printk("Client is new");
+		/* New client - Does not take reference on new client */
+		wg_client_create(peer->device, peer, (const u8 *)&eth_hdr(skb)->h_source);
 	}
+/* TODO: Use netlink flag here instead */
+#if WG_CLIENT_FORWARDING == 1
+	if (is_multicast_ether_addr((const u8 *)&eth_hdr(skb)->h_dest)) {
+		/* Packet is multicast -> forward packet to all other peers */
+		printk("Packet is multicast");
+		wg_tap_xmit_multicast(skb_copy(skb, GFP_ATOMIC), dev, peer);
+	} else {
+		client = wg_client_lookup_dst(&peer->device->client_hashtable, skb);
 
-	if (unlikely(len > skb->len))
-		goto dishonest_packet_size;
-	len_before_trim = skb->len;
-	if (unlikely(pskb_trim(skb, len)))
-		goto packet_processed;
+		if (client) {
+			if (peer && peer != client->peer)
+				printk("Forwarding to peer");
+				/* Forward packet to destination peer */
+				wg_tap_xmit_peer(skb_copy(skb, GFP_ATOMIC), dev, client->peer);
 
-	routed_peer = tb_allowedips_lookup_src(&peer->device->peer_allowedips,
-					       skb);
-	tb_peer_put(routed_peer); /* We don't need the extra reference. */
-
-	if (unlikely(routed_peer != peer))
-		goto dishonest_packet_peer;
+			wg_client_put(client);
+		} else {
+			printk("Destination unknown -> multicast");
+			/* We don't know the destination -> forward packet to all other peers */
+			wg_tap_xmit_multicast(skb_copy(skb, GFP_ATOMIC), dev, peer);
+		}
+	}
+#endif
+	printk("GRO receive");
 
 	if (unlikely(napi_gro_receive(&peer->napi, skb) == GRO_DROP)) {
 		++dev->stats.rx_dropped;
@@ -425,7 +440,7 @@ static void tb_packet_consume_data_done(struct tb_peer *peer,
 				    dev->name, peer->internal_id,
 				    &peer->endpoint.addr);
 	} else {
-		update_rx_stats(peer, message_data_len(len_before_trim));
+		update_rx_stats(peer, message_data_len(skb->len));
 	}
 	return;
 
@@ -489,6 +504,8 @@ int tb_packet_rx_poll(struct napi_struct *napi, int budget)
 		if (unlikely(tb_socket_endpoint_from_skb(&endpoint, skb)))
 			goto next;
 
+		debug_print_skb_dump(skb, "tb: receive.c: tb_packet_rx_poll");
+
 		tb_reset_packet(skb);
 		tb_packet_consume_data_done(peer, skb, &endpoint);
 		free = false;
@@ -535,6 +552,8 @@ static void tb_packet_consume_data(struct tb_device *tb, struct sk_buff *skb)
 	__le32 idx = ((struct message_data *)skb->data)->key_idx;
 	struct tb_peer *peer = NULL;
 	int ret;
+
+	debug_print_skb_dump(skb, "tb: receive.c: tb_packet_consume_data");
 
 	rcu_read_lock_bh();
 	PACKET_CB(skb)->keypair =
@@ -593,6 +612,7 @@ void tb_packet_receive(struct tb_device *tb, struct sk_buff *skb)
 	}
 	case cpu_to_le32(MESSAGE_DATA):
 		PACKET_CB(skb)->ds = ip_tunnel_get_dsfield(ip_hdr(skb), skb);
+		debug_print_skb_dump(skb, "tb: receive.c: tb_packet_receive");
 		tb_packet_consume_data(tb, skb);
 		break;
 	default:
